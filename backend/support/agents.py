@@ -1,7 +1,7 @@
 
 from google import genai
-from django.conf import settings
-from .tools import get_order_details , get_refund_history , check_delivery_status
+from django.conf import settings # type: ignore
+from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile
 from .models import Conversation , Message , AgentLog
 from google.genai import types
 
@@ -35,14 +35,66 @@ Important rules:
 - If refund decision is needed — tell customer you are checking with your team
 - Never use bold text, bullet points or any markdown formatting. Plain text only.
 - Keep replies concise and conversational. Maximum 3-4 sentences. No long paragraphs.
+
+Refund escalation rule:
+- When a customer requests a refund, first check order details.
+- Then check refund history.
+- If a refund decision is required, you MUST call escalate_to_manager.
+- Do not simply tell the customer that you will check with the team.
+- The escalation summary MUST contain the customer user_id, order details, refund history, and complaint.
+- After receiving the manager's decision, communicate that decision to the customer.
 """
 
+MANAGER_SYSTEM_PROMPT = """
+You are a senior support manager at CoolBreeze AC.
+A support agent has escalated a customer case to you for a refund decision.
 
+Your responsibilities:
+- Review the case summary carefully
+- Consider the customer's refund history
+- Make a fair and final refund decision
+- Give a clear reason for your decision
 
+Your decision options:
+- Approve refund — if the case is genuine and within policy
+- Deny refund — if the case is suspicious or outside policy
+- Escalate to risk team — if you suspect fraud
 
+Important rules:
+- Be fair but firm
+- Base decision on facts — not emotions
+- Always give a specific reason for your decision
+- Keep your response concise and professional
+"""
+
+RISK_SYSTEM_PROMPT = """
+You are a fraud risk analyst at CoolBreeze AC.
+A support manager has sent you a customer profile for risk assessment.
+
+Your job:
+- Analyse the customer's order and refund patterns
+- Identify suspicious behaviour
+- Return a clear risk verdict
+
+Risk levels:
+- LOW — genuine customer, normal behaviour
+- MEDIUM — some suspicious signals, proceed with caution
+- HIGH — clear fraud pattern, recommend denial
+
+Your response format:
+- Risk Level: LOW / MEDIUM / HIGH
+- Key Signals: what you found suspicious or genuine
+- Recommendation: what manager should do
+
+Important:
+- Be objective — base verdict on data only
+- One bad refund does not make someone fraudulent
+- Look for patterns — not isolated incidents
+"""
 #-------------------
 
 SUPPORT_TOOLS = [
+    
     {
         "name": "get_order_details",
         "description": "Fetch complete order details including status, carrier, tracking number and days since order was placed. Use this when customer mentions their order or complains about delivery.",
@@ -91,20 +143,79 @@ SUPPORT_TOOLS = [
             "required": ["tracking_number", "carrier"]
         }
     },
+
+    {
+        "name": "escalate_to_manager",
+        "description": "Escalate the case to manager for refund decision. Always include customer's user_id in the case summary so manager can assess fraud risk accurately.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "case_summary": {
+                    "type": "string",
+                    "description": "Complete case summary. Must include: customer user_id, order details, refund history and complaint. Format: Start with 'Customer User ID: X' on the first line."
+                }
+            },
+            "required": ["case_summary"]
+        }
+    },
 ]
 
 
+MANAGER_TOOLS = [
+    {
+        "name": "assess_fraud_risk",
+        "description": "Consult the risk agent to assess fraud risk for a customer. Use this when refund request looks suspicious or customer has multiple refund requests. Pass the user_id to get a risk verdict.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "The user ID to assess fraud risk for"
+                }
+            },
+            "required": ["user_id"]
+        }
+    }
+]
+
+RISK_TOOLS = [
+    {
+        "name": "get_customer_risk_profile",
+        "description": "Get complete risk profile for a customer including order history, refund patterns and ratio. Use this to assess fraud risk.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "The user ID to assess risk for"
+                }
+            },
+            "required": ["user_id"]
+        }
+    }
+]
 
 
 #-------------------
 
-def execute_tool(tool_name , input_tool):
+def execute_tool(tool_name , input_tool , conversation_id):
     if tool_name == "get_order_details" :
         return get_order_details(input_tool["order_id"])
     elif tool_name == "get_refund_history" :
         return get_refund_history(input_tool["user_id"])
     elif tool_name == "check_delivery_status" :
         return check_delivery_status(input_tool["tracking_number"] , input_tool["carrier"])
+    elif tool_name == "escalate_to_manager" :
+        case_summary = input_tool["case_summary"]
+        decision = run_manager_agent(case_summary , conversation_id)
+        return decision
+    elif tool_name == "assess_fraud_risk" :
+        verdict = run_risk_agent(input_tool["user_id"] , conversation_id)
+        return verdict
+    elif tool_name == "get_customer_risk_profile" : 
+         return get_customer_risk_profile(input_tool["user_id"])
+       
+        
 
 #-------------------
     
@@ -149,7 +260,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
         )
 
 
-        # اگر Gemini درخواست tool داشت
+   
         if response.function_calls:
 
             tool_results = []
@@ -159,14 +270,16 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
                 tool_name = function_call.name
                 tool_args = function_call.args
 
-                print("Executing tool:", tool_name)
-                print("Arguments:", tool_args)
 
+                AgentLog.objects.create(conversation=conv, event_type="tool_call", message=f"Calling tool {tool_name} with {tool_args}")
 
                 result = execute_tool(
                     tool_name,
-                    tool_args
+                    tool_args,
+                    conversation_id
                 )
+
+                AgentLog.objects.create(conversation=conv, event_type="tool_result", message=f"{tool_name} returned: {str(result)[:200]}")
 
 
                 tool_results.append(
@@ -179,13 +292,13 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
                 )
 
 
-            # اضافه کردن درخواست مدل به history
+
             conversation_messages.append(
                 response.candidates[0].content
             )
 
 
-            # اضافه کردن نتیجه ابزار به history
+   
             conversation_messages.append(
                 types.Content(
                     role="user",
@@ -195,8 +308,188 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
 
         else:
-            return response.text
+            final_reply = response.text
+            AgentLog.objects.create(conversation=conv, event_type="final", message=final_reply)
+            return final_reply
 
      
 
- 
+def run_manager_agent(case_summary , conversation_id) :
+
+    conv = Conversation.objects.get(id=conversation_id)
+
+    AgentLog.objects.create(conversation=conv, event_type="manager", message=f"Case received for review: {case_summary[:200]}")
+
+
+    manager_messages = [
+    types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(text=case_summary)
+        ]
+    )
+]
+
+    while True:
+    
+            response = client.models.generate_content(
+                model=gemini_model,
+                contents=manager_messages,
+                config=types.GenerateContentConfig(
+                    system_instruction=
+                        MANAGER_SYSTEM_PROMPT,
+                    tools=[
+                        types.Tool(
+                            function_declarations=[
+                                types.FunctionDeclaration(
+                                    name=tool["name"],
+                                    description=tool["description"],
+                                    parameters=tool["input_schema"]
+                                )
+                                for tool in MANAGER_TOOLS
+                            ]
+                        )
+                    ]
+                )
+            )
+    
+    
+   
+            if response.function_calls:
+    
+                tool_results = []
+    
+                for function_call in response.function_calls:
+    
+                    tool_name = function_call.name
+                    tool_args = function_call.args
+
+
+
+                    AgentLog.objects.create(conversation=conv, event_type="manager", message="Consulting risk agent for fraud assessment...")
+
+                    result = execute_tool(
+                        tool_name,
+                        tool_args,
+                        conversation_id
+                    )
+    
+    
+                    tool_results.append(
+                        types.Part.from_function_response(
+                            name=tool_name,
+                            response={
+                                "result": result
+                            }
+                        )
+                    )
+    
+    
+                manager_messages.append(
+                    response.candidates[0].content
+                )
+    
+    
+          
+                manager_messages.append(
+                    types.Content(
+                        role="user",
+                        parts=tool_results
+                    )
+                )
+    
+    
+            else:
+                decision = response.text
+                AgentLog.objects.create(conversation=conv, event_type="manager", message=f"Decision: {decision[:200]}")
+                return decision
+
+
+
+def run_risk_agent(user_id , conversation_id) :
+
+    conv = Conversation.objects.get(id=conversation_id)
+    AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Starting fraud assessment for user {user_id}")
+
+    risk_messages = [
+    types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(
+                text=f"Please assess the fraud risk for user ID {user_id}. Use your tool to get their profile and return a verdict."
+            )
+        ]
+    )
+]
+
+    while True:
+    
+            response = client.models.generate_content(
+                model=gemini_model,
+                contents=risk_messages,
+                config=types.GenerateContentConfig(
+                    system_instruction=
+                        RISK_SYSTEM_PROMPT,
+                    tools=[
+                        types.Tool(
+                            function_declarations=[
+                                types.FunctionDeclaration(
+                                    name=tool["name"],
+                                    description=tool["description"],
+                                    parameters=tool["input_schema"]
+                                )
+                                for tool in RISK_TOOLS
+                            ]
+                        )
+                    ]
+                )
+            )
+    
+    
+   
+            if response.function_calls:
+    
+                tool_results = []
+    
+                for function_call in response.function_calls:
+    
+                    tool_name = function_call.name
+                    tool_args = function_call.args
+
+                    AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Calling {tool_name} to get customer risk profile...")
+    
+                    result = execute_tool(
+                        tool_name,
+                        tool_args,
+                        conversation_id
+                    )
+    
+    
+                    tool_results.append(
+                        types.Part.from_function_response(
+                            name=tool_name,
+                            response={
+                                "result": result
+                            }
+                        )
+                    )
+    
+    
+                risk_messages.append(
+                    response.candidates[0].content
+                )
+    
+    
+          
+                risk_messages.append(
+                    types.Content(
+                        role="user",
+                        parts=tool_results
+                    )
+                )
+    
+    
+            else:
+                verdict = response.text
+                AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Verdict: {verdict[:200]}")
+                return verdict

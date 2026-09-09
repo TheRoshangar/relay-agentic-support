@@ -1,5 +1,5 @@
-from django.db import models
-from django.contrib.auth.models import User
+from django.db import models # type: ignore
+from django.contrib.auth.models import User # type: ignore
 from orders.models import Order
 
 # Create your models here.
@@ -11,6 +11,17 @@ class Conversation(models.Model):
 
     def __str__(self):
         return f"Conversation #{self.id} - {self.user.username} / Order #{self.order.id}"
+
+    @property
+    def manager_involved(self):
+        return self.agentlogs.filter(event_type="manager").exists()
+
+    @property
+    def risk_assessed(self):
+        return self.agentlogs.filter(event_type="risk").exists()
+
+    
+
 
 
 
