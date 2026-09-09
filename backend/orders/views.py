@@ -2,6 +2,9 @@ from django.shortcuts import render , get_object_or_404
 from .models import Order , RefundRequest
 from django.contrib.auth.decorators import login_required
 from support.models import Conversation
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .serializers import OrderSerializer
 
 
 @login_required
@@ -32,3 +35,12 @@ def order_detail(request , order_id) :
         'previous_messages' : previous_messages,
     }
     return render(request , "order_detail.html" , context)
+
+
+@api_view(["GET"])
+def orders_api(request):
+    orders = Order.objects.filter(user=request.user)
+
+    serializer = OrderSerializer(orders, many=True)
+
+    return Response(serializer.data)
