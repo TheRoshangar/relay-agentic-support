@@ -1,46 +1,34 @@
-from django.shortcuts import render , get_object_or_404
-from .models import Order , RefundRequest
-from django.contrib.auth.decorators import login_required
-from support.models import Conversation
-from rest_framework.decorators import api_view
+
+from django.shortcuts import get_object_or_404
+
+from .models import Order
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
 from .serializers import OrderSerializer
 
 
-@login_required
-def orders_list(request):
-    orders = Order.objects.filter(user = request.user)
-    context = {
-        'orders' : orders,
-    }
-    return render(request , 'orders_list.html' , context )
-
-
-
-def order_detail(request , order_id) :
-    order = get_object_or_404(Order , id = order_id , user = request.user )
-    refunds = RefundRequest.objects.filter(order = order)
-    try : 
-        conversation = Conversation.objects.get(user = request.user , order = order)
-        previous_messages = conversation.messages.order_by("created_at")
-    except Conversation.DoesNotExist :   
-        conversation = None
-        previous_messages = []
-    
-    
-    context  = {
-        'order' : order,
-        'refunds' : refunds,
-        'conversation' : conversation,
-        'previous_messages' : previous_messages,
-    }
-    return render(request , "order_detail.html" , context)
-
-
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def orders_api(request):
     orders = Order.objects.filter(user=request.user)
 
     serializer = OrderSerializer(orders, many=True)
 
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def order_detail_api(request, order_id):
+    order = get_object_or_404(
+        Order,
+        id=order_id,
+        user=request.user
+    )
+
+    serializer = OrderSerializer(order)
+
+    return Response(serializer.data)
+

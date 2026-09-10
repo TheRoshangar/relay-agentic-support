@@ -1,15 +1,17 @@
 from django.shortcuts import render , get_object_or_404 # type: ignore
-import json
 from django.http import JsonResponse # type: ignore
 from orders.models import Order
 from .models import Conversation , Message
 from support.agents import run_support_agent
 from django.contrib.admin.views.decorators import staff_member_required # type: ignore
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
-# Create your views here.
+
+@api_view(["POST"])
 def chat(request, order_id):
     if request.method == 'POST':
-        data = json.loads(request.body)
+        data = request.data
         user_message = data.get("message")
 
         if not user_message:
@@ -46,28 +48,64 @@ def chat(request, order_id):
 
 
 
-@staff_member_required
+@api_view(["GET"])
 def dashboard(request):
-    conversations = Conversation.objects.all().order_by("-created_at")
-    context = {
-        'conversations' : conversations
-    }
+    conversations = Conversation.objects.filter(
+        user=request.user
+    ).order_by("-created_at")
 
-    return render(request , "support/dashboard.html" , context)
+    data = []
+
+    for conversation in conversations:
+        data.append({
+            "id": conversation.id,
+            "user_id": conversation.user_id,
+            "order_id": conversation.order_id,
+            "created_at": conversation.created_at,
+        })
+
+    return Response(data)
 
 
-def conversation_detail(request , conversation_id) :
-    conversation = get_object_or_404(Conversation , id=conversation_id)
+@api_view(["GET"])
+def conversation_detail(request, conversation_id):
+    conversation = get_object_or_404(
+    Conversation,
+    id=conversation_id,
+    user=request.user
+    )
+
     messages = conversation.messages.order_by("created_at")
     agentlogs = conversation.agentlogs.order_by("created_at")
 
-    context = {
-            'conversations' : conversation,
-            'messages' : messages,
-            'agentlogs' : agentlogs,
+    data = {
+        "conversation": {
+            "id": conversation.id,
+            "user_id": conversation.user_id,
+            "order_id": conversation.order_id,
+            "created_at": conversation.created_at,
+        },
+        "messages": [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at,
+            }
+            for message in messages
+        ],
+        "agentlogs": [
+            {
+               "id": log.id,
+               "event_type": log.event_type,
+               "message": log.message,
+               "created_at": log.created_at,
+            }
+            for log in agentlogs
+        ],
     }
-    
-    return render(request , "support/conversation_detail.html" , context)
+
+    return Response(data)
 
 
 
