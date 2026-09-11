@@ -56,7 +56,6 @@ def check_delivery_status(tracking_number , carrier) :
     return result
 
 
-
 def get_customer_risk_profile(user_id):
     refunds = RefundRequest.objects.filter(user_id=user_id)
     orders = Order.objects.filter(user_id=user_id)

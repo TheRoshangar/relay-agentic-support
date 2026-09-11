@@ -20,11 +20,6 @@ class Conversation(models.Model):
     def risk_assessed(self):
         return self.agentlogs.filter(event_type="risk").exists()
 
-    
-
-
-
-
 class Message(models.Model): 
     ROLE_CHOICES = [
         ('user' ,'User' ) , 

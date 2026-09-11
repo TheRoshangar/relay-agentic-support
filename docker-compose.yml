@@ -1,110 +1,234 @@
 services:
 
   postgres:
+
     image: postgres:16
+
     container_name: relay_postgres
+
     environment:
+
       POSTGRES_DB: ${DB_NAME}
+
       POSTGRES_USER: ${DB_USER}
+
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+
     ports:
+
       - "5432:5432"
+
     volumes:
+
       - postgres_data:/var/lib/postgresql/data
+
     healthcheck:
+
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+
       interval: 5s
+
       timeout: 5s
+
       retries: 10
+
 
   rabbitmq:
+
     image: rabbitmq:3-management
+
     container_name: relay_rabbitmq
+
     environment:
+
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+
     ports:
+
       - "5672:5672"
+
       - "15672:15672"
+
     volumes:
+
       - rabbitmq_data:/var/lib/rabbitmq
+
     healthcheck:
+
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+
       interval: 10s
+
       timeout: 5s
+
       retries: 10
+
+
+  redis:
+
+    image: redis:7
+
+    container_name: relay_redis
+
+    ports:
+
+      - "6379:6379"
+
 
   chromadb:
+
     image: chromadb/chroma:latest
+
     container_name: relay_chromadb
+
     ports:
+
       - "8001:8000"
+
     volumes:
+
       - chroma_data:/chroma/chroma
+
     healthcheck:
+
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8000' || exit 1"]
+
       interval: 10s
+
       timeout: 5s
+
       retries: 10
+
       start_period: 10s
 
+
   backend:
+
     build:
+
       context: ./backend
+
     container_name: relay_backend
+
     env_file:
+
       - .env
+
     environment:
+
       DB_HOST: postgres
+
       DB_PORT: 5432
+
       RABBITMQ_HOST: rabbitmq
+
       CHROMA_HOST: chromadb
+
+      REDIS_HOST: redis
+
+      REDIS_PORT: 6379
+
     ports:
+
       - "8000:8000"
+
     volumes:
+
       - ./backend:/app
+
+    command: uvicorn di_ai_employees_main.asgi:application --host 0.0.0.0 --port 8000
+
     depends_on:
+
       postgres:
+
         condition: service_healthy
+
       rabbitmq:
+
         condition: service_healthy
+
       chromadb:
+
         condition: service_healthy
+
+      redis:
+
+        condition: service_started
+
 
   ai-worker:
+
     build:
+
       context: ./ai-worker
+
     container_name: relay_ai_worker
+
     env_file:
+
       - .env
+
     environment:
+
       DB_HOST: postgres
+
       DB_PORT: 5432
+
       RABBITMQ_HOST: rabbitmq
+
       CHROMA_HOST: chromadb
+
     volumes:
+
       - ./ai-worker:/app
+
+      - ./backend:/backend
+
     depends_on:
+
       postgres:
+
         condition: service_healthy
+
       rabbitmq:
+
         condition: service_healthy
+
       chromadb:
+
         condition: service_healthy
+
 
   frontend:
+
     build:
+
       context: ./frontend
+
     container_name: relay_frontend
+
     ports:
+
       - "5173:5173"
+
     volumes:
+
       - ./frontend:/app
+
       - /app/node_modules
+
     depends_on:
+
       - backend
 
+
 volumes:
+
   postgres_data:
+
   rabbitmq_data:
+
   chroma_data:

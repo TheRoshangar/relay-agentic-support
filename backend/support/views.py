@@ -2,13 +2,29 @@ from django.shortcuts import render , get_object_or_404 # type: ignore
 from django.http import JsonResponse # type: ignore
 from orders.models import Order
 from .models import Conversation , Message
-from support.agents import run_support_agent
+
+import json
+import time
+import asyncio
+from django.http import StreamingHttpResponse
+
+from .events import publish_support_event
+
 from django.contrib.admin.views.decorators import staff_member_required # type: ignore
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from django.shortcuts import render
+from django.contrib.admin.views.decorators import staff_member_required
+from rest_framework.permissions import IsAuthenticated
+
+
+from .event_stream import get_events
+
+
 
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def chat(request, order_id):
     if request.method == 'POST':
         data = request.data
@@ -30,22 +46,20 @@ def chat(request, order_id):
             content=user_message
         )
 
-        reply = run_support_agent(user_message, conversation.id , order_id , request.user.id)
-
-        Message.objects.create(
-            conversation=conversation,
-            role="model",
-            content=reply
-        )
+        publish_support_event({
+        "conversation_id": conversation.id,
+        "order_id": order_id,
+        "user_id": request.user.id,
+        "message": user_message,
+        })
 
         return JsonResponse({
-            "reply": reply
-        })
+        "status": "processing",
+    })
 
     return JsonResponse({
         "error": "Only POST allowed"
     }, status=405)  
-
 
 
 @api_view(["GET"])
@@ -69,6 +83,7 @@ def dashboard(request):
 
 @api_view(["GET"])
 def conversation_detail(request, conversation_id):
+
     conversation = get_object_or_404(
     Conversation,
     id=conversation_id,
@@ -109,3 +124,32 @@ def conversation_detail(request, conversation_id):
 
 
 
+@staff_member_required
+def dashboard_view(request):
+    conversations = Conversation.objects.all().order_by("-created_at")
+    return render(request, "support/dashboard.html", {
+        "conversations": conversations
+    })
+
+
+@staff_member_required
+def conversation_detail_view(request, conversation_id):
+    conversation = get_object_or_404(Conversation, id=conversation_id)
+    messages = conversation.messages.order_by("created_at")
+    agentlogs = conversation.agentlogs.order_by("created_at")
+    return render(request, "support/conversation_detail.html", {
+        "conversation": conversation,
+        "messages": messages,
+        "agentlogs": agentlogs,
+    })
+
+async def support_events(request):
+
+    response = StreamingHttpResponse(
+        get_events(),
+        content_type="text/event-stream",
+    )
+
+    response["Cache-Control"] = "no-cache"
+
+    return response

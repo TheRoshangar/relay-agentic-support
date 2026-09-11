@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
+from django.middleware.csrf import get_token
 
 
 @csrf_exempt
@@ -39,5 +40,14 @@ def login_api(request):
             "id": user.id,
             "username": user.username,
         }
+    })
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def csrf_token_api(request):
+    return Response({
+        "csrfToken": get_token(request)
     })
 

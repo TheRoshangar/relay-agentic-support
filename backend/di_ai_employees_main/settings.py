@@ -150,3 +150,9 @@ LOGIN_URL = '/login/'
 
 GEMINI_API_KEY = config("GEMINI_API_KEY")
 GEMINI_MODEL = config("GEMINI_MODEL")
+
+
+RABBITMQ_HOST = config("RABBITMQ_HOST", default="localhost")
+RABBITMQ_PORT = config("RABBITMQ_PORT", default=5672, cast=int)
+RABBITMQ_USER = config("RABBITMQ_USER", default="guest")
+RABBITMQ_PASSWORD = config("RABBITMQ_PASSWORD", default="guest")

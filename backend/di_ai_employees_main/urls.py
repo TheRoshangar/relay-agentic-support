@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.contrib.auth import views as auth_views
 
-from .auth_api import login_api
+from .auth_api import login_api, csrf_token_api
 
 
 urlpatterns = [
@@ -24,4 +24,9 @@ urlpatterns = [
 
     path('orders/', include('orders.urls')),
     path('support/', include('support.urls')),
+    path(
+    'api/csrf/',
+    csrf_token_api,
+    name='csrf_token_api'
+),
 ]

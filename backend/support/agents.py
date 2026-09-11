@@ -311,8 +311,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
             final_reply = response.text
             AgentLog.objects.create(conversation=conv, event_type="final", message=final_reply)
             return final_reply
-
-     
+  
 
 def run_manager_agent(case_summary , conversation_id) :
 
