@@ -5,6 +5,9 @@ from .tools import get_order_details , get_refund_history , check_delivery_statu
 from .models import Conversation , Message , AgentLog
 from google.genai import types
 
+import json
+import pika  # type: ignore
+
 
 client = genai.Client(
     api_key=settings.GEMINI_API_KEY
@@ -12,7 +15,6 @@ client = genai.Client(
 gemini_model = settings.GEMINI_MODEL
 
 
-# Support System Prompt
 SUPPORT_SYSTEM_PROMPT = """
 You are Maya, a customer support agent at CoolBreeze AC.
 You help customers with issues related to their AC orders.
@@ -198,6 +200,82 @@ RISK_TOOLS = [
 
 #-------------------
 
+def _publish_agent_log_event(conversation_id, event_type, message):
+    """
+    Publish an agent log event to the same RabbitMQ fanout exchange used
+    for final replies, tagged with type "agent_log" so the async consumer
+    on the backend side can route it to the admin panel's SSE stream
+    (publish_conversation_event), instead of the customer chat SSE stream.
+    """
+
+    credentials = pika.PlainCredentials(
+        settings.RABBITMQ_USER,
+        settings.RABBITMQ_PASSWORD,
+    )
+
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(
+            host=settings.RABBITMQ_HOST,
+            port=settings.RABBITMQ_PORT,
+            credentials=credentials,
+        )
+    )
+
+    try:
+        channel = connection.channel()
+
+        channel.exchange_declare(
+            exchange="support_responses",
+            exchange_type="fanout",
+            durable=True,
+        )
+
+        channel.queue_declare(
+            queue="support_responses",
+            durable=True,
+        )
+
+        channel.queue_bind(
+            exchange="support_responses",
+            queue="support_responses",
+        )
+
+        channel.basic_publish(
+            exchange="support_responses",
+            routing_key="",
+            body=json.dumps({
+                "type": "agent_log",
+                "conversation_id": conversation_id,
+                "event_type": event_type,
+                "message": message,
+            }),
+            properties=pika.BasicProperties(
+                delivery_mode=2,
+            ),
+        )
+
+    finally:
+        connection.close()
+
+
+def _create_log(conv, event_type, message):
+    """
+    Save an AgentLog row (as before) AND publish it live to the admin
+    panel via RabbitMQ, so the "Agent Activity" panel updates in
+    real time instead of only after a page refresh.
+    """
+
+    AgentLog.objects.create(
+        conversation=conv,
+        event_type=event_type,
+        message=message,
+    )
+
+    _publish_agent_log_event(conv.id, event_type, message)
+
+
+#-------------------
+
 def execute_tool(tool_name , input_tool , conversation_id):
     if tool_name == "get_order_details" :
         return get_order_details(input_tool["order_id"])
@@ -271,7 +349,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
                 tool_args = function_call.args
 
 
-                AgentLog.objects.create(conversation=conv, event_type="tool_call", message=f"Calling tool {tool_name} with {tool_args}")
+                _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
 
                 result = execute_tool(
                     tool_name,
@@ -279,7 +357,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
                     conversation_id
                 )
 
-                AgentLog.objects.create(conversation=conv, event_type="tool_result", message=f"{tool_name} returned: {str(result)[:200]}")
+                _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
 
 
                 tool_results.append(
@@ -309,7 +387,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
         else:
             final_reply = response.text
-            AgentLog.objects.create(conversation=conv, event_type="final", message=final_reply)
+            _create_log(conv, "final", final_reply)
             return final_reply
   
 
@@ -317,7 +395,7 @@ def run_manager_agent(case_summary , conversation_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
 
-    AgentLog.objects.create(conversation=conv, event_type="manager", message=f"Case received for review: {case_summary[:200]}")
+    _create_log(conv, "manager", f"Case received for review: {case_summary[:200]}")
 
 
     manager_messages = [
@@ -365,7 +443,7 @@ def run_manager_agent(case_summary , conversation_id) :
 
 
 
-                    AgentLog.objects.create(conversation=conv, event_type="manager", message="Consulting risk agent for fraud assessment...")
+                    _create_log(conv, "manager", "Consulting risk agent for fraud assessment...")
 
                     result = execute_tool(
                         tool_name,
@@ -400,7 +478,7 @@ def run_manager_agent(case_summary , conversation_id) :
     
             else:
                 decision = response.text
-                AgentLog.objects.create(conversation=conv, event_type="manager", message=f"Decision: {decision[:200]}")
+                _create_log(conv, "manager", f"Decision: {decision[:200]}")
                 return decision
 
 
@@ -408,7 +486,7 @@ def run_manager_agent(case_summary , conversation_id) :
 def run_risk_agent(user_id , conversation_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
-    AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Starting fraud assessment for user {user_id}")
+    _create_log(conv, "risk", f"Starting fraud assessment for user {user_id}")
 
     risk_messages = [
     types.Content(
@@ -455,7 +533,7 @@ def run_risk_agent(user_id , conversation_id) :
                     tool_name = function_call.name
                     tool_args = function_call.args
 
-                    AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Calling {tool_name} to get customer risk profile...")
+                    _create_log(conv, "risk", f"Calling {tool_name} to get customer risk profile...")
     
                     result = execute_tool(
                         tool_name,
@@ -490,5 +568,5 @@ def run_risk_agent(user_id , conversation_id) :
     
             else:
                 verdict = response.text
-                AgentLog.objects.create(conversation=conv, event_type="risk", message=f"Verdict: {verdict[:200]}")
+                _create_log(conv, "risk", f"Verdict: {verdict[:200]}")
                 return verdict

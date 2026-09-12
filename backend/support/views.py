@@ -18,8 +18,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from rest_framework.permissions import IsAuthenticated
 
 
-from .event_stream import get_events
-
+from .event_stream import get_events, get_conversation_events, publish_conversation_event
 
 
 
@@ -45,6 +44,13 @@ def chat(request, order_id):
             role="user",
             content=user_message
         )
+
+        publish_conversation_event({
+            "type": "user_message",
+            "conversation_id": conversation.id,
+            "role": "user",
+            "content": user_message,
+        })
 
         publish_support_event({
         "conversation_id": conversation.id,
@@ -157,6 +163,28 @@ async def support_events(request):
 
     response = StreamingHttpResponse(
         get_events(user.id),
+        content_type="text/event-stream",
+    )
+
+    response["Cache-Control"] = "no-cache"
+
+    return response
+
+
+async def conversation_events(request, conversation_id):
+
+    user = await request.auser()
+
+    if not user.is_authenticated or not user.is_staff:
+        return JsonResponse({"error": "Staff authentication required"}, status=401)
+
+    print(
+        f"ADMIN CONVERSATION EVENTS VIEW CALLED for conversation {conversation_id}",
+        flush=True
+    )
+
+    response = StreamingHttpResponse(
+        get_conversation_events(conversation_id),
         content_type="text/event-stream",
     )
 

@@ -4,8 +4,7 @@ import json
 import aio_pika
 from django.conf import settings
 
-from .event_stream import publish_event
-
+from .event_stream import publish_event, publish_conversation_event
 
 RESPONSE_QUEUE_NAME = "support_responses"
 EXCHANGE_NAME = "support_responses"
@@ -59,12 +58,30 @@ async def _consume():
                             event = json.loads(message.body)
 
                             print(
-                                "========== SSE RELAY: SUPPORT RESPONSE ==========",
+                                "========== SSE RELAY EVENT ==========",
                                 flush=True,
                             )
                             print(event, flush=True)
 
-                            publish_event(event)
+                            event_kind = event.get("type")
+
+                            if event_kind == "agent_log":
+                                publish_conversation_event(event)
+
+                            elif event_kind == "support_response":
+                                publish_event(event)
+                                publish_conversation_event({
+                                    "type": "final",
+                                    "conversation_id": event.get("conversation_id"),
+                                    "role": "model",
+                                    "content": event.get("reply"),
+                                })
+
+                            else:
+                                print(
+                                    f"UNKNOWN EVENT TYPE: {event_kind}",
+                                    flush=True,
+                                )
 
         except Exception as e:
 

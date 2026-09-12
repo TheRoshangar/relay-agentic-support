@@ -3,8 +3,7 @@
 {% block content %}
       <!-- Header -->
       <div class="d-flex align-items-center gap-3 mb-4">
-        <a href="{% url 'dashboard' %}" class="text-muted text-decoration-none" style="font-size:13px;">← Back</a>
-        <h5 class="fw-bold mb-0">Conversation #{{ conversation.id }}</h5>
+        <a href="{% url 'dashboard_page' %}" class="text-muted text-decoration-none" style="font-size:13px;">← Back</a>        <h5 class="fw-bold mb-0">Conversation #{{ conversation.id }}</h5>
         <span class="text-muted" style="font-size:13px;">{{ conversation.user.first_name }} {{ conversation.user.last_name }} · Order #{{ conversation.order.id }} · {{ conversation.order.product_name }}</span>
       </div>
 
@@ -116,7 +115,11 @@
     }
 
     function showSpinner(){
-      document.getElementById("agent-activity").insertAdjacentHTML("beforeend", 
+      const agentActivity = document.getElementById("agent-activity");
+
+      if(document.getElementById("agent-spinner")) return;
+
+      agentActivity.insertAdjacentHTML("beforeend",
         `<div class="spinner-border spinner-border-sm" id="agent-spinner" role="status"></div>`
       );
       agentActivity.scrollTop = agentActivity.scrollHeight;
@@ -126,79 +129,91 @@
       document.getElementById("agent-spinner")?.remove();
     }
 
-    // function appendLog(type, message){
-    //   const agentActivity = document.getElementById("agent-activity");
-    //   const time = new Date().toLocaleTimeString([],  {hour: '2-digit', minute: '2-digit', hour12: true});
+    function appendLog(type, message){
+      const agentActivity = document.getElementById("agent-activity");
+      const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: true});
 
-    //   const badgeColors = {
-    //     "tool_call": "bg-primary",
-    //     "tool_result": "bg-secondary",
-    //     "manager": "bg-warning text-dark",
-    //     "risk": "bg-danger",
-    //     "final": "bg-success"
-    //   }
+      const badgeColors = {
+        "tool_call": "bg-primary",
+        "tool_result": "bg-secondary",
+        "manager": "bg-warning text-dark",
+        "risk": "bg-danger",
+        "final": "bg-success"
+      };
 
-    //   const badgeColor = badgeColors[type] || bg-secondary; // badgeColors["manager"]
+      const badgeColor = badgeColors[type] || "bg-secondary";
 
-    //   agentActivity.insertAdjacentHTML("beforeend", `
-    //     <div>
-    //         <div class="d-flex align-items-center gap-2 mb-1">
-    //           <span class="badge ${badgeColor}" style="font-size:10px;">${type}</span>
-    //           <span class="text-muted" style="font-size:11px;">${time}</span>
-    //         </div>
-    //         <p class="mb-0 text-muted" style="font-size:12px;">${message}</p>
-    //     </div>
-    //   `);
+      agentActivity.insertAdjacentHTML("beforeend", `
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="badge ${badgeColor}" style="font-size:10px;">${type}</span>
+              <span class="text-muted" style="font-size:11px;">${time}</span>
+            </div>
+            <p class="mb-0 text-muted" style="font-size:12px;">${message}</p>
+        </div>
+      `);
 
-    //   agentActivity.scrollTop = agentActivity.scrollHeight;
-    // }
+      agentActivity.scrollTop = agentActivity.scrollHeight;
+    }
 
-    // const conversationId = {{ conversation.id }};
-    // const source = new EventSource(`/support/dashboard/stream/${conversationId}/`); // establishing SSE connection
+    const conversationId = {{ conversation.id }};
 
-    // source.onmessage = (e) => {
-    //   const event = JSON.parse(e.data);
+    let eventSource = null;
+    let reconnectDelay = 1000;
 
-    //   if(event.type == "done"){
-    //     hideSpinner();
-    //     return;
-    //   }
+    function connectSSE(){
 
-    //   hideSpinner();
-      
-    //   if(event.type == "user_message"){
-    //     appendMessage("user", event.name, event.message);
-    //     // append the message to chat transcript
-    //   } else if(event.type == "final"){
-    //     appendLog(event.type, event.message);
-    //     appendMessage("assistant", "Maya", event.message);
-    //     // append the message to transcript
-    //   }else{
-    //     appendLog(event.type, event.message);
-    //   }
-      
+      eventSource = new EventSource(
+        `/support/conversation-events/${conversationId}/`,
+        { withCredentials: true }
+      );
 
-    //   if(event.type !== "final"){
-    //     showSpinner();
-    //   };
+      eventSource.onopen = () => {
+        console.log("Admin SSE connected");
+        reconnectDelay = 1000;
+      };
 
-    //   source.onerror = () => {
-    //     console.log("SSE connection closed.");
-    //     source.close();
-    //   }
-    // }
+      eventSource.onmessage = (e) => {
 
+        const event = JSON.parse(e.data);
+
+        hideSpinner();
+
+        if(event.type === "user_message"){
+          appendMessage("user", "{{ conversation.user.first_name }}", event.content);
+          showSpinner();
+
+        } else if(event.type === "final"){
+          appendLog("final", event.content);
+          appendMessage("assistant", "Maya", event.content);
+
+        } else if(event.type === "agent_log"){
+          appendLog(event.event_type, event.message);
+          showSpinner();
+        }
+      };
+
+      eventSource.onerror = () => {
+        console.log("Admin SSE connection error, will reconnect...");
+        eventSource.close();
+
+        setTimeout(connectSSE, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+      };
+    }
 
     document.addEventListener("DOMContentLoaded", function(){
       const chatTranscript = document.getElementById("chat-transcript");
       const agentActivity = document.getElementById("agent-activity");
-      
+
       if(chatTranscript){
         chatTranscript.scrollTop = chatTranscript.scrollHeight;
       }
       if(agentActivity){
         agentActivity.scrollTop = agentActivity.scrollHeight;
       }
+
+      connectSSE();
     })
   </script>
 {% endblock %}

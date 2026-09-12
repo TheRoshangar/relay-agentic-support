@@ -50,8 +50,7 @@
                     {% endif %}
                 </td>
                 <td class="text-muted">{{ conv.created_at }}</td>
-                <td><a href="{% url 'conversation_detail' conv.id %}" class="btn btn-sm btn-outline-secondary">View</a></td>
-            </tr>
+                <td><a href="{% url 'conversation_detail_page' conv.id %}" class="btn btn-sm btn-outline-secondary">View</a></td>            </tr>
             {% endfor %}
               
             </tbody>
