@@ -120,7 +120,8 @@ function Conversation() {
 
     // SSE connection
     const eventSource = new EventSource(
-      'http://localhost:8000/support/events/'
+      'http://localhost:8000/support/events/',
+      { withCredentials: true }
     )
 
 

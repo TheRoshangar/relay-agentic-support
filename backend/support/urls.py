@@ -9,9 +9,5 @@ urlpatterns = [
     path('dashboard/<int:conversation_id>/' , views.conversation_detail , name="conversation_detail"),
     path('conversation/<int:conversation_id>/', views.conversation_detail_view, name="conversation_detail_view"),
     path('dashboard-page/<int:conversation_id>/', views.conversation_detail_view, name="conversation_detail"),
-    path(
-    'events/',
-    views.support_events,
-    name='support_events',
-),
+    path('events/',views.support_events,name='support_events'),
 ]

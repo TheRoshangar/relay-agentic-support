@@ -145,8 +145,18 @@ def conversation_detail_view(request, conversation_id):
 
 async def support_events(request):
 
+    user = await request.auser()
+
+    if not user.is_authenticated:
+        return JsonResponse({"error": "Authentication required"}, status=401)
+
+    print(
+        f"SUPPORT EVENTS VIEW CALLED for user {user.id}",
+        flush=True
+    )
+
     response = StreamingHttpResponse(
-        get_events(),
+        get_events(user.id),
         content_type="text/event-stream",
     )
 

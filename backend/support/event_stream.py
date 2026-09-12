@@ -2,20 +2,26 @@ import asyncio
 import json
 
 
-listeners = []
+listeners = {}
 
 
-def add_listener(queue):
-    listeners.append(queue)
+def add_listener(user_id, queue):
+    listeners.setdefault(user_id, []).append(queue)
 
 
-def remove_listener(queue):
-    if queue in listeners:
-        listeners.remove(queue)
+def remove_listener(user_id, queue):
+    queues = listeners.get(user_id)
 
+    if queues and queue in queues:
+        queues.remove(queue)
+
+        if not queues:
+            del listeners[user_id]
 
 
 def publish_event(event):
+
+    user_id = event.get("user_id")
 
     print(
         "PUBLISH EVENT CALLED",
@@ -23,26 +29,27 @@ def publish_event(event):
         flush=True
     )
 
+    queues = listeners.get(user_id, [])
+
     print(
-        "LISTENERS:",
-        len(listeners),
+        f"LISTENERS for user {user_id}:",
+        len(queues),
         flush=True
     )
 
-    for queue in listeners:
+    for queue in queues:
         queue.put_nowait(event)
 
 
-
-async def get_events():
+async def get_events(user_id):
 
     queue = asyncio.Queue()
 
-    add_listener(queue)
+    add_listener(user_id, queue)
 
     print(
-        "SSE CLIENT CONNECTED. LISTENERS:",
-        len(listeners),
+        f"SSE CLIENT CONNECTED for user {user_id}. LISTENERS:",
+        len(listeners.get(user_id, [])),
         flush=True
     )
 
@@ -54,7 +61,6 @@ async def get_events():
 
             yield f"data: {json.dumps(event)}\n\n"
 
-
     finally:
 
-        remove_listener(queue)
+        remove_listener(user_id, queue)
