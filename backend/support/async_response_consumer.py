@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-import aio_pika
+import aio_pika # type: ignore
 from django.conf import settings
 
 from .event_stream import publish_event, publish_conversation_event

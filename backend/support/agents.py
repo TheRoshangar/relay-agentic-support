@@ -1,7 +1,7 @@
 
 from google import genai
 from django.conf import settings # type: ignore
-from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile
+from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base
 from .models import Conversation , Message , AgentLog
 from google.genai import types
 
@@ -160,6 +160,20 @@ SUPPORT_TOOLS = [
             "required": ["case_summary"]
         }
     },
+    {
+        "name": "search_knowledge_base",
+        "description": "Search CoolBreeze AC company documents including refund policy, warranty policy, and product FAQs. Use this when customer asks about company policies, warranty coverage, warranty claims, refund eligibility, or any general product information that requires accurate company documentation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to find relevant information from company documents. Be specific — for example 'refund eligibility within 30 days' instead of just 'refund'."
+                }
+            },
+            "required": ["query"]
+        }
+    }
 ]
 
 
@@ -292,6 +306,8 @@ def execute_tool(tool_name , input_tool , conversation_id):
         return verdict
     elif tool_name == "get_customer_risk_profile" : 
          return get_customer_risk_profile(input_tool["user_id"])
+    elif tool_name == "search_knowledge_base":
+        return search_knowledge_base(input_tool["query"])
        
         
 

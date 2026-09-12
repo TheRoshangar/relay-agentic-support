@@ -129,7 +129,6 @@ def conversation_detail(request, conversation_id):
     return Response(data)
 
 
-
 @staff_member_required
 def dashboard_view(request):
     conversations = Conversation.objects.all().order_by("-created_at")
