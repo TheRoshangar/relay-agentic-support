@@ -113,33 +113,20 @@ Important:
 SUPPORT_TOOLS = [
     
     {
-        "name": "get_order_details",
-        "description": "Fetch complete order details including status, carrier, tracking number and days since order was placed. Use this when customer mentions their order or complains about delivery.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "order_id": {
-                    "type": "integer",
-                    "description": "The order ID to look up"
-                }
-            },
-            "required": ["order_id"]
-        }
+    "name": "get_order_details",
+    "description": "Fetch complete order details for the customer's order in this conversation, including status, carrier, tracking number and days since order was placed.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
     },
-
     {
-        "name": "get_refund_history",
-        "description": "Get complete refund history for a user. Use this before making any refund related decisions.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "user_id": {
-                    "type": "integer",
-                    "description": "The user ID to check refund history for"
-                }
-            },
-            "required": ["user_id"]
-        }
+    "name": "get_refund_history",
+    "description": "Get complete refund history for the current authenticated customer. Use this before making any refund related decisions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
     },
 
     {
@@ -209,35 +196,23 @@ SUPPORT_TOOLS = [
 
 MANAGER_TOOLS = [
     {
-        "name": "assess_fraud_risk",
-        "description": "Consult the risk agent to assess fraud risk for a customer. Use this when refund request looks suspicious or customer has multiple refund requests. Pass the user_id to get a risk verdict.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "user_id": {
-                    "type": "integer",
-                    "description": "The user ID to assess fraud risk for"
-                }
-            },
-            "required": ["user_id"]
-        }
+    "name": "assess_fraud_risk",
+    "description": "Consult the risk agent to assess fraud risk for the customer in this case.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
     }
 ]
 
 RISK_TOOLS = [
     {
-        "name": "get_customer_risk_profile",
-        "description": "Get complete risk profile for a customer including order history, refund patterns and ratio. Use this to assess fraud risk.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "user_id": {
-                    "type": "integer",
-                    "description": "The user ID to assess risk for"
-                }
-            },
-            "required": ["user_id"]
-        }
+    "name": "get_customer_risk_profile",
+    "description": "Get complete risk profile for the customer being assessed, including order history and refund ratio.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
     }
 ]
 #-------------------
@@ -285,7 +260,7 @@ def support_tools_node(state: SupportAgentState):
         tool_args = dict(part.function_call.args)
 
         _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
-        result = execute_tool(tool_name, tool_args, state["conversation_id"])
+        result = execute_tool(tool_name, tool_args, state["conversation_id"] , order_id=state["order_id"],user_id=state["user_id"],)
         _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
 
         tool_results.append(
@@ -423,26 +398,26 @@ support_graph_builder.add_edge("finalize", END)
 support_graph = support_graph_builder.compile()
 #-------------------
 
-def execute_tool(tool_name , input_tool , conversation_id):
-    if tool_name == "get_order_details" :
-        return get_order_details(input_tool["order_id"])
-    elif tool_name == "get_refund_history" :
-        return get_refund_history(input_tool["user_id"])
-    elif tool_name == "check_delivery_status" :
-        return check_delivery_status(input_tool["tracking_number"] , input_tool["carrier"])
-    elif tool_name == "escalate_to_manager" :
+def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=None):
+    if tool_name == "get_order_details":
+        return get_order_details(order_id)
+    elif tool_name == "get_refund_history":
+        return get_refund_history(user_id)
+    elif tool_name == "check_delivery_status":
+        return check_delivery_status(input_tool["tracking_number"], input_tool["carrier"])
+    elif tool_name == "escalate_to_manager":
         case_summary = input_tool["case_summary"]
-        decision = run_manager_agent(case_summary , conversation_id)
+        decision = run_manager_agent(case_summary, conversation_id, user_id)
         return decision
-    elif tool_name == "assess_fraud_risk" :
-        verdict = run_risk_agent(input_tool["user_id"] , conversation_id)
+    elif tool_name == "assess_fraud_risk":
+        verdict = run_risk_agent(user_id, conversation_id)
         return verdict
-    elif tool_name == "get_customer_risk_profile" : 
-         return get_customer_risk_profile(input_tool["user_id"])
+    elif tool_name == "get_customer_risk_profile":
+        return get_customer_risk_profile(user_id)
     elif tool_name == "search_knowledge_base":
         return search_knowledge_base(input_tool["query"])
-    elif tool_name == "search_web" :
-        return search_web(input_tool["query"])   
+    elif tool_name == "search_web":
+        return search_web(input_tool["query"]) 
         
 
 #-------------------
@@ -471,7 +446,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
     _create_log(conv, "final", final_reply)
     return final_reply
 
-def run_manager_agent(case_summary , conversation_id) :
+def run_manager_agent(case_summary , conversation_id , user_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
 
@@ -528,7 +503,8 @@ def run_manager_agent(case_summary , conversation_id) :
                     result = execute_tool(
                         tool_name,
                         tool_args,
-                        conversation_id
+                        conversation_id,
+                        user_id=user_id,
                     )
     
     
@@ -616,7 +592,8 @@ def run_risk_agent(user_id , conversation_id) :
                     result = execute_tool(
                         tool_name,
                         tool_args,
-                        conversation_id
+                        conversation_id,
+                        user_id=user_id,
                     )
     
     
