@@ -6,7 +6,7 @@ from .models import Conversation , Message
 
 from django.http import StreamingHttpResponse
 
-from .events import publish_support_event
+from .events import publish_support_event , build_envelope
 
 from django.contrib.admin.views.decorators import staff_member_required # type: ignore
 from rest_framework.decorators import api_view, permission_classes
@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from rest_framework.permissions import IsAuthenticated
+
 
 
 from .event_stream import get_events, get_conversation_events, publish_conversation_event
@@ -50,16 +51,21 @@ def chat(request, order_id):
             "content": user_message,
         })
 
-        publish_support_event({
-        "conversation_id": conversation.id,
-        "order_id": order_id,
-        "user_id": request.user.id,
-        "message": user_message,
-        })
+        envelope = build_envelope(
+            event_type="process_support_message",
+            payload={
+                "conversation_id": conversation.id,
+                "order_id": order_id,
+                "user_id": request.user.id,
+                "message": user_message,
+            },
+        )
+
+        publish_support_event(envelope)
 
         return JsonResponse({
         "status": "processing",
-    })
+        })
 
     return JsonResponse({
         "error": "Only POST allowed"
@@ -145,6 +151,7 @@ def conversation_detail_view(request, conversation_id):
         "messages": messages,
         "agentlogs": agentlogs,
     })
+
 
 async def support_events(request):
 

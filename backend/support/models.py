@@ -35,6 +35,7 @@ class Message(models.Model):
 
 
 class AgentLog(models.Model):
+     
      EVENT_CHOICES = [
         ("support", "Support Agent"),
         ("tool_call", "Tool Call"),
@@ -49,4 +50,12 @@ class AgentLog(models.Model):
      created_at = models.DateTimeField(auto_now_add=True)
 
      def __str__(self):
-         return f"[{self.event_type}] - {self.message[:40]}"
+      return f"[{self.event_type}] - {self.message[:40]}"
+
+class ProcessedEvent(models.Model):
+    event_id = models.UUIDField(unique=True)
+    event_type = models.CharField(max_length=50)
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event_type} - {self.event_id}"

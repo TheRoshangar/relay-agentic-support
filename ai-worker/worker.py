@@ -1,12 +1,14 @@
 import json
 import os
 import sys
-
-import pika  # type: ignore
-
-
-# دسترسی worker به کدهای Django
 sys.path.insert(0, "/backend")
+import pika  # type: ignore
+import time
+
+from support.events import build_envelope, is_duplicate_event, mark_event_processed # type: ignore
+
+
+
 
 os.environ.setdefault(
     "DJANGO_SETTINGS_MODULE",
@@ -82,27 +84,46 @@ def publish_support_response(event_data):
         connection.close()
 
 
-def process_event(event):
+MAX_RETRIES = 3
+BASE_DELAY = 2  # ثانیه؛ فاصله‌ها می‌شن ۲، ۴، ۸
+
+
+def process_event(envelope):
+    event_id = envelope["event_id"]
+    correlation_id = envelope["correlation_id"]
+
+    if is_duplicate_event(event_id):
+        print(f"Skipping duplicate event {event_id}", flush=True)
+        return
 
     print("========== SUPPORT EVENT ==========", flush=True)
-    print(event, flush=True)
+    print(envelope, flush=True)
 
-    conversation_id = event["conversation_id"]
-    order_id = event["order_id"]
-    user_id = event["user_id"]
-    user_message = event["message"]
+    conversation_id = envelope["conversation_id"]
+    order_id = envelope["order_id"]
+    user_id = envelope["user_id"]
+    user_message = envelope["message"]
 
-    reply = run_support_agent(
-        user_message,
-        conversation_id,
-        order_id,
-        user_id,
-    )
+    attempt = 0
+    while True:
+        try:
+            reply = run_support_agent(
+                user_message,
+                conversation_id,
+                order_id,
+                user_id,
+            )
+            break
+        except Exception as e:
+            attempt += 1
+            if attempt > MAX_RETRIES:
+                print(f"Giving up on event {event_id} after {attempt} attempts: {e}", flush=True)
+                raise
+            delay = BASE_DELAY * (2 ** (attempt - 1))
+            print(f"Attempt {attempt} failed ({e}), retrying in {delay}s", flush=True)
+            time.sleep(delay)
 
-    conversation = get_object_or_404(
-        Conversation,
-        id=conversation_id,
-    )
+    conversation = get_object_or_404(Conversation, id=conversation_id)
 
     Message.objects.create(
         conversation=conversation,
@@ -110,25 +131,26 @@ def process_event(event):
         content=reply,
     )
 
-    response_event = {
-        "type": "support_response",
-        "conversation_id": conversation_id,
-        "order_id": order_id,
-        "user_id": user_id,
-        "reply": reply,
-    }
+    mark_event_processed(event_id, envelope["type"])
 
-    publish_support_response(response_event)
+    response_envelope = build_envelope(
+        event_type="support_response",
+        payload={
+            "conversation_id": conversation_id,
+            "order_id": order_id,
+            "user_id": user_id,
+            "reply": reply,
+        },
+        correlation_id=correlation_id,
+    )
+
+    publish_support_response(response_envelope)
 
     print("========== AGENT RESPONSE ==========", flush=True)
     print(reply, flush=True)
 
-    print(
-        "========== RESPONSE EVENT PUBLISHED ==========",
-        flush=True
-    )
-    print(response_event, flush=True)
-
+    print("========== RESPONSE EVENT PUBLISHED ==========", flush=True)
+    print(response_envelope, flush=True)
 
 def callback(ch, method, properties, body):
 

@@ -8,7 +8,7 @@ import chromadb # type: ignore
 from django.conf import settings
 
 client = chromadb.HttpClient(
-    host=settings.CHROMA_HOST,   # از env، مقدارش "chromadb" هست طبق docker-compose
+    host=settings.CHROMA_HOST,   
     port=8000,
 )
 embedding_fn = DefaultEmbeddingFunction()
