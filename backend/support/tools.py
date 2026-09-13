@@ -4,6 +4,8 @@ from orders.models import Order , RefundRequest
 from django.utils import timezone
 from .tracking_data import DELIVERY_DATA
 from .rag import search_knowledge_base as rag_search
+from django.conf import settings
+from tavily import TavilyClient # type: ignore
 
 def get_order_details(order_id) :
     try:
@@ -90,5 +92,33 @@ def get_customer_risk_profile(user_id):
     }
 
 def search_knowledge_base(query):
+
     result = rag_search(query)
     return {"result": result}
+
+
+tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+
+
+def search_web(query):
+    try:
+        response = tavily_client.search(
+            query=query,
+            max_results=3,
+            include_answer=False,
+        )
+    except Exception as e:
+        return {"error": f"Web search failed: {str(e)}"}
+
+    results = []
+    for r in response.get("results", []):
+        results.append({
+            "title": r.get("title"),
+            "url": r.get("url"),
+            "content": r.get("content"),
+        })
+
+    return {
+        "source": "web",
+        "results": results,
+    }

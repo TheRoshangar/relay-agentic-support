@@ -1,7 +1,7 @@
 
 from google import genai
 from django.conf import settings # type: ignore
-from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base
+from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
 from .models import Conversation , Message , AgentLog
 from google.genai import types
 
@@ -174,6 +174,21 @@ SUPPORT_TOOLS = [
             "required": ["query"]
         }
     }
+     ,
+    {
+        "name": "search_web",
+        "description": "Search the public web for current external information that is not part of the company's own data — for example news, strikes, weather, or general topics outside CoolBreeze AC's orders and policy documents. Do not use this for order status, refund history, or company policy — those must come from the other tools.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to look up on the public web."
+                }
+            },
+            "required": ["query"]
+        }
+    }
 ]
 
 
@@ -308,7 +323,8 @@ def execute_tool(tool_name , input_tool , conversation_id):
          return get_customer_risk_profile(input_tool["user_id"])
     elif tool_name == "search_knowledge_base":
         return search_knowledge_base(input_tool["query"])
-       
+    elif tool_name == "search_web" :
+        return search_web(input_tool["query"])   
         
 
 #-------------------

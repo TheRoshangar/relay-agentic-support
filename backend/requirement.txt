@@ -12,3 +12,4 @@ uvicorn
 aio-pika
 chromadb
 pypdf
+tavily-python
