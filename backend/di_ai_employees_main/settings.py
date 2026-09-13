@@ -158,3 +158,5 @@ RABBITMQ_USER = config("RABBITMQ_USER", default="guest")
 RABBITMQ_PASSWORD = config("RABBITMQ_PASSWORD", default="guest")
 
 TAVILY_API_KEY = config("TAVILY_API_KEY")
+
+CHROMA_HOST = config("CHROMA_HOST", default="localhost")

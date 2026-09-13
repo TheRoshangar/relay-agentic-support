@@ -8,6 +8,21 @@ from google.genai import types
 import json
 import pika  # type: ignore
 
+from typing import TypedDict, Annotated
+import operator
+from langgraph.graph import StateGraph, END # type: ignore
+
+
+
+class SupportAgentState(TypedDict):
+    messages: Annotated[list, operator.add]
+    conversation_id: int
+    order_id: int
+    user_id: int
+    steps: int
+
+
+MAX_STEPS = 6
 
 client = genai.Client(
     api_key=settings.GEMINI_API_KEY
@@ -225,6 +240,91 @@ RISK_TOOLS = [
         }
     }
 ]
+#-------------------
+
+def support_agent_node(state: SupportAgentState):
+    response = client.models.generate_content(
+        model=gemini_model,
+        contents=state["messages"],
+        config=types.GenerateContentConfig(
+            system_instruction=(
+                SUPPORT_SYSTEM_PROMPT
+                + f"\n\nContext: This conversation is about Order #{state['order_id']}, user: {state['user_id']}"
+            ),
+            tools=[
+                types.Tool(
+                    function_declarations=[
+                        types.FunctionDeclaration(
+                            name=tool["name"],
+                            description=tool["description"],
+                            parameters=tool["input_schema"],
+                        )
+                        for tool in SUPPORT_TOOLS
+                    ]
+                )
+            ],
+        ),
+    )
+
+    return {
+        "messages": [response.candidates[0].content],
+        "steps": state["steps"] + 1,
+    }
+
+
+def support_tools_node(state: SupportAgentState):
+    conv = Conversation.objects.get(id=state["conversation_id"])
+    last_content = state["messages"][-1]
+
+    tool_results = []
+    for part in last_content.parts:
+        if not part.function_call:
+            continue
+
+        tool_name = part.function_call.name
+        tool_args = dict(part.function_call.args)
+
+        _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
+        result = execute_tool(tool_name, tool_args, state["conversation_id"])
+        _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
+
+        tool_results.append(
+            types.Part.from_function_response(
+                name=tool_name,
+                response={"result": result},
+            )
+        )
+
+    return {"messages": [types.Content(role="user", parts=tool_results)]}
+
+
+def support_finalize_node(state: SupportAgentState):
+    response = client.models.generate_content(
+        model=gemini_model,
+        contents=state["messages"] + [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(
+                    text="You have reached the step limit. Answer the customer now, "
+                         "in plain text, using whatever information you already gathered."
+                )],
+            )
+        ],
+        config=types.GenerateContentConfig(system_instruction=SUPPORT_SYSTEM_PROMPT),
+    )
+    return {"messages": [response.candidates[0].content]}
+
+
+def support_should_continue(state: SupportAgentState):
+    last_content = state["messages"][-1]
+    has_calls = any(part.function_call for part in last_content.parts)
+
+    if not has_calls:
+        return "stop"
+    if state["steps"] >= MAX_STEPS:
+        return "finalize"
+    return "tools"
+
 
 
 #-------------------
@@ -247,6 +347,8 @@ def _publish_agent_log_event(conversation_id, event_type, message):
             host=settings.RABBITMQ_HOST,
             port=settings.RABBITMQ_PORT,
             credentials=credentials,
+            heartbeat=600,
+            blocked_connection_timeout=600,
         )
     )
 
@@ -302,7 +404,23 @@ def _create_log(conv, event_type, message):
 
     _publish_agent_log_event(conv.id, event_type, message)
 
+#-------------------
 
+support_graph_builder = StateGraph(SupportAgentState)
+support_graph_builder.add_node("agent", support_agent_node)
+support_graph_builder.add_node("tools", support_tools_node)
+support_graph_builder.add_node("finalize", support_finalize_node)
+
+support_graph_builder.set_entry_point("agent")
+support_graph_builder.add_conditional_edges(
+    "agent",
+    support_should_continue,
+    {"tools": "tools", "finalize": "finalize", "stop": END},
+)
+support_graph_builder.add_edge("tools", "agent")
+support_graph_builder.add_edge("finalize", END)
+
+support_graph = support_graph_builder.compile()
 #-------------------
 
 def execute_tool(tool_name , input_tool , conversation_id):
@@ -336,92 +454,22 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
     for msg in conv.messages.order_by("created_at"):
         conversation_messages.append(
-            types.Content(
-                role=msg.role,
-                parts=[
-                    types.Part.from_text(text=msg.content)
-                ],
-            )
+            types.Content(role=msg.role, parts=[types.Part.from_text(text=msg.content)])
         )
 
+    final_state = support_graph.invoke({
+        "messages": conversation_messages,
+        "conversation_id": conversation_id,
+        "order_id": order_id,
+        "user_id": user_id,
+        "steps": 0,
+    })
 
-    while True:
+    last_content = final_state["messages"][-1]
+    final_reply = "".join(part.text for part in last_content.parts if part.text)
 
-        response = client.models.generate_content(
-            model=gemini_model,
-            contents=conversation_messages,
-            config=types.GenerateContentConfig(
-                system_instruction=
-                    SUPPORT_SYSTEM_PROMPT +
-                    f"\n\nContext: This conversation is about Order #{order_id}, user: {user_id}",
-                tools=[
-                    types.Tool(
-                        function_declarations=[
-                            types.FunctionDeclaration(
-                                name=tool["name"],
-                                description=tool["description"],
-                                parameters=tool["input_schema"]
-                            )
-                            for tool in SUPPORT_TOOLS
-                        ]
-                    )
-                ]
-            )
-        )
-
-
-   
-        if response.function_calls:
-
-            tool_results = []
-
-            for function_call in response.function_calls:
-
-                tool_name = function_call.name
-                tool_args = function_call.args
-
-
-                _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
-
-                result = execute_tool(
-                    tool_name,
-                    tool_args,
-                    conversation_id
-                )
-
-                _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
-
-
-                tool_results.append(
-                    types.Part.from_function_response(
-                        name=tool_name,
-                        response={
-                            "result": result
-                        }
-                    )
-                )
-
-
-
-            conversation_messages.append(
-                response.candidates[0].content
-            )
-
-
-   
-            conversation_messages.append(
-                types.Content(
-                    role="user",
-                    parts=tool_results
-                )
-            )
-
-
-        else:
-            final_reply = response.text
-            _create_log(conv, "final", final_reply)
-            return final_reply
-  
+    _create_log(conv, "final", final_reply)
+    return final_reply
 
 def run_manager_agent(case_summary , conversation_id) :
 
@@ -512,8 +560,6 @@ def run_manager_agent(case_summary , conversation_id) :
                 decision = response.text
                 _create_log(conv, "manager", f"Decision: {decision[:200]}")
                 return decision
-
-
 
 def run_risk_agent(user_id , conversation_id) :
 

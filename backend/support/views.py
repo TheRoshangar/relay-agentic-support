@@ -3,9 +3,7 @@ from django.http import JsonResponse # type: ignore
 from orders.models import Order
 from .models import Conversation , Message
 
-import json
-import time
-import asyncio
+
 from django.http import StreamingHttpResponse
 
 from .events import publish_support_event

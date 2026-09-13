@@ -5,3 +5,7 @@ google-genai
 python-decouple
 djangorestframework
 django-cors-headers
+chromadb
+pypdf
+tavily-python
+langgraph

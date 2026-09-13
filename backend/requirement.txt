@@ -13,3 +13,4 @@ aio-pika
 chromadb
 pypdf
 tavily-python
+langgraph

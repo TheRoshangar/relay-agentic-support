@@ -4,8 +4,13 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction # type: 
 import os
 from pypdf import PdfReader # type: ignore
 
+import chromadb # type: ignore
+from django.conf import settings
 
-client = chromadb.PersistentClient(path="./chroma_db")
+client = chromadb.HttpClient(
+    host=settings.CHROMA_HOST,   # از env، مقدارش "chromadb" هست طبق docker-compose
+    port=8000,
+)
 embedding_fn = DefaultEmbeddingFunction()
 
 collection = client.get_or_create_collection(

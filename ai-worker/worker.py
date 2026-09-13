@@ -45,6 +45,8 @@ def publish_support_response(event_data):
             host=RABBITMQ_HOST,
             port=RABBITMQ_PORT,
             credentials=credentials,
+            heartbeat=600,
+            blocked_connection_timeout=600,
         )
     )
 
@@ -164,6 +166,8 @@ def main():
             host=RABBITMQ_HOST,
             port=RABBITMQ_PORT,
             credentials=credentials,
+            heartbeat=600,
+            blocked_connection_timeout=600,
         )
     )
 
