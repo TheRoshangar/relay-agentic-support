@@ -404,36 +404,38 @@ def _create_log(conv, event_type, message):
 def _log_generation(correlation_id, name, model_input, response):
 
     try:
-        langfuse.trace(id=correlation_id, name="support_conversation")
-
+        trace_id = langfuse.create_trace_id(seed=correlation_id)
         usage = getattr(response, "usage_metadata", None)
-        langfuse.generation(
-            trace_id=correlation_id,
+
+        with langfuse.start_as_current_observation(
+            as_type="generation",
             name=name,
             model=gemini_model,
             input=str(model_input),
-            output=getattr(response, "text", None),
-            usage={
-                "input": getattr(usage, "prompt_token_count", 0) or 0,
-                "output": getattr(usage, "candidates_token_count", 0) or 0,
-            } if usage else None,
-        )
+            trace_context={"trace_id": trace_id},
+        ) as generation:
+            generation.update(
+                output=getattr(response, "text", None),
+                usage_details={
+                    "input": getattr(usage, "prompt_token_count", 0) or 0,
+                    "output": getattr(usage, "candidates_token_count", 0) or 0,
+                } if usage else None,
+            )
     except Exception as e:
         print(f"Langfuse generation logging failed: {e}", flush=True)
 
-
 def _log_tool_span(correlation_id, tool_name, tool_args, result):
     try:
-        langfuse.trace(id=correlation_id, name="support_conversation")
-        langfuse.span(
-            trace_id=correlation_id,
+        trace_id = langfuse.create_trace_id(seed=correlation_id)
+
+        with langfuse.start_as_current_observation(
+            as_type="span",
             name=f"tool:{tool_name}",
-            input=tool_args,
-            output=result,
-        )
+            trace_context={"trace_id": trace_id},
+        ) as span:
+            span.update(input=tool_args, output=result)
     except Exception as e:
         print(f"Langfuse span logging failed: {e}", flush=True)
-
 
 def _record_gemini_usage(conversation_id, response):
     usage = getattr(response, "usage_metadata", None)
