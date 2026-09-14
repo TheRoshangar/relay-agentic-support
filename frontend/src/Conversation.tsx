@@ -57,6 +57,20 @@ function Conversation() {
   const [chatLoading, setChatLoading] = useState(false)
   const [conversationLoading, setConversationLoading] = useState(false)
 
+  type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'failed'
+
+  const [connectionStatus, setConnectionStatus] =
+  useState<ConnectionStatus>('connecting')
+
+  const wasConnectedRef = useRef(false)
+  const failedAttemptsRef = useRef(0) 
+
+  const selectedConversationRef = useRef<ConversationType | null>(null)
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  }, [selectedConversation])
+
   const [csrfToken, setCsrfToken] = useState('')
 
   const chatRef = useRef<HTMLDivElement | null>(null)
@@ -124,25 +138,45 @@ function Conversation() {
       { withCredentials: true }
     )
 
+    eventSource.onopen = () => {
+      failedAttemptsRef.current = 0
+      setConnectionStatus('connected')
+
+      if (wasConnectedRef.current === true) {
+        resyncCurrentConversation()
+      }
+
+      wasConnectedRef.current = true
+    }
 
     eventSource.onmessage = (event) => {
-
       const data = JSON.parse(event.data)
-
-
       if (data.type === 'support_response') {
-
         setMessages((previous) => [
           ...previous,
-          {
-            role: 'model',
-            content: data.reply,
-          },
+        { role: 'model', content: data.reply },
         ])
-
         setChatLoading(false)
       }
     }
+
+    eventSource.onerror = () => {
+      failedAttemptsRef.current += 1
+
+      if (eventSource.readyState === EventSource.CLOSED) {
+        setConnectionStatus('failed')
+      } 
+      else if (failedAttemptsRef.current >= 5) {
+        eventSource.close()
+        setConnectionStatus('failed')
+      } 
+      else {
+        setConnectionStatus('reconnecting')
+      }
+}
+
+
+    
 
 
     eventSource.onerror = () => {
@@ -244,6 +278,26 @@ function Conversation() {
 
   }
 
+  const resyncCurrentConversation = async () => {
+    const conv = selectedConversationRef.current
+    if (!conv) return
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/support/dashboard/${conv.id}/`,
+        { credentials: 'include' }
+      )
+
+      if (!response.ok) return
+
+      const data: ConversationDetail = await response.json()
+      setMessages(data.messages)
+      setChatLoading(false)
+    } catch {
+    // مشکلی نیست، دفعه‌ی بعد که وصل بشه دوباره امتحان می‌کنیم
+    }
+  }
+
 
 
   const sendMessage = async () => {
@@ -331,6 +385,13 @@ function Conversation() {
   return (
 
     <div>
+
+      <div style={{ marginBottom: '8px', fontSize: '14px' }}>
+          {connectionStatus === 'connected' && '🟢 Connected'}
+          {connectionStatus === 'connecting' && '🟡 Connecting...'}
+          {connectionStatus === 'reconnecting' && '🟠 Reconnecting...'}
+          {connectionStatus === 'failed' && '🔴 Connection lost — please refresh the page'}
+      </div>
 
       <h1>Conversation</h1>
 
