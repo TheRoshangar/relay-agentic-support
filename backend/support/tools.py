@@ -6,6 +6,8 @@ from .tracking_data import DELIVERY_DATA
 from .rag import search_knowledge_base as rag_search
 from django.conf import settings
 from tavily import TavilyClient # type: ignore
+from django.db.models import F
+from .models import Conversation
 
 def get_order_details(order_id) :
     try:
@@ -108,7 +110,7 @@ def search_knowledge_base(query):
 tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
 
 
-def search_web(query):
+def search_web(query  , conversation_id=None):
     try:
         response = tavily_client.search(
             query=query,
@@ -117,6 +119,12 @@ def search_web(query):
         )
     except Exception as e:
         return {"error": f"Web search failed: {str(e)}"}
+
+    if conversation_id:
+        Conversation.objects.filter(id=conversation_id).update(
+            tavily_calls=F("tavily_calls") + 1
+        )
+
 
     results = []
     for r in response.get("results", []):

@@ -9,6 +9,22 @@ class Conversation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+    total_input_tokens = models.PositiveIntegerField(default=0)
+    total_output_tokens = models.PositiveIntegerField(default=0)
+    tavily_calls = models.PositiveIntegerField(default=0)
+
+    GEMINI_INPUT_PRICE_PER_MILLION = 0.30
+    GEMINI_OUTPUT_PRICE_PER_MILLION = 2.50
+    TAVILY_PRICE_PER_CALL = 0.008  
+
+    @property
+    def estimated_cost_usd(self):
+        input_cost = (self.total_input_tokens / 1_000_000) * self.GEMINI_INPUT_PRICE_PER_MILLION
+        output_cost = (self.total_output_tokens / 1_000_000) * self.GEMINI_OUTPUT_PRICE_PER_MILLION
+        tavily_cost = self.tavily_calls * self.TAVILY_PRICE_PER_CALL
+        return round(input_cost + output_cost + tavily_cost, 6)
+
+
     def __str__(self):
         return f"Conversation #{self.id} - {self.user.username} / Order #{self.order.id}"
 

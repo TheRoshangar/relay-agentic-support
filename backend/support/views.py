@@ -86,6 +86,7 @@ def dashboard(request):
             "user_id": conversation.user_id,
             "order_id": conversation.order_id,
             "created_at": conversation.created_at,
+            "estimated_cost_usd": conversation.estimated_cost_usd,
         })
 
     return Response(data)
@@ -109,6 +110,7 @@ def conversation_detail(request, conversation_id):
             "user_id": conversation.user_id,
             "order_id": conversation.order_id,
             "created_at": conversation.created_at,
+            "estimated_cost_usd": conversation.estimated_cost_usd,
         },
         "messages": [
             {

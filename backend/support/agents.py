@@ -7,6 +7,7 @@ from google.genai import types
 
 import json
 import pika  # type: ignore
+from django.db.models import F
 
 from typing import TypedDict, Annotated
 import operator
@@ -240,7 +241,7 @@ def support_agent_node(state: SupportAgentState):
             ],
         ),
     )
-
+    _record_gemini_usage(state["conversation_id"], response)
     return {
         "messages": [response.candidates[0].content],
         "steps": state["steps"] + 1,
@@ -287,6 +288,7 @@ def support_finalize_node(state: SupportAgentState):
         ],
         config=types.GenerateContentConfig(system_instruction=SUPPORT_SYSTEM_PROMPT),
     )
+    _record_gemini_usage(state["conversation_id"], response)
     return {"messages": [response.candidates[0].content]}
 
 
@@ -379,6 +381,19 @@ def _create_log(conv, event_type, message):
 
     _publish_agent_log_event(conv.id, event_type, message)
 
+
+def _record_gemini_usage(conversation_id, response):
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return
+
+    input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+    output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+
+    Conversation.objects.filter(id=conversation_id).update(
+        total_input_tokens=F("total_input_tokens") + input_tokens,
+        total_output_tokens=F("total_output_tokens") + output_tokens,
+    )
 #-------------------
 
 support_graph_builder = StateGraph(SupportAgentState)
@@ -417,7 +432,7 @@ def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=
     elif tool_name == "search_knowledge_base":
         return search_knowledge_base(input_tool["query"])
     elif tool_name == "search_web":
-        return search_web(input_tool["query"]) 
+        return search_web(input_tool["query"] , conversation_id=conversation_id) 
         
 
 #-------------------
@@ -484,6 +499,7 @@ def run_manager_agent(case_summary , conversation_id , user_id) :
                     ]
                 )
             )
+            _record_gemini_usage(conversation_id, response)
     
     
    
@@ -575,8 +591,8 @@ def run_risk_agent(user_id , conversation_id) :
                     ]
                 )
             )
-    
-    
+
+            _record_gemini_usage(conversation_id, response)
    
             if response.function_calls:
     
