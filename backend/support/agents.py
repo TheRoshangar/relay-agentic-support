@@ -1,4 +1,5 @@
 
+from django.db.migrations import state
 from django.template import response
 from google import genai
 from django.conf import settings # type: ignore
@@ -12,7 +13,7 @@ from django.db.models import F
 
 from typing import TypedDict, Annotated
 import operator
-from langfuse import Langfuse
+from langfuse import Langfuse # type: ignore
 from langgraph.graph import StateGraph, END # type: ignore
 
 
@@ -32,6 +33,27 @@ client = genai.Client(
     api_key=settings.GEMINI_API_KEY
 )
 gemini_model = settings.GEMINI_MODEL
+gemini_fallback_model = settings.GEMINI_FALLBACK_MODEL
+
+
+def _generate_content(contents, config):
+    try:
+        return client.models.generate_content(
+            model=gemini_model,
+            contents=contents,
+            config=config,
+        )
+    except Exception as e:
+        if not gemini_fallback_model or gemini_fallback_model == gemini_model:
+            raise
+
+        print(f"Primary model {gemini_model} failed ({e}), falling back to {gemini_fallback_model}", flush=True)
+
+        return client.models.generate_content(
+            model=gemini_fallback_model,
+            contents=contents,
+            config=config,
+        )
 
 langfuse = Langfuse(
     public_key=settings.LANGFUSE_PUBLIC_KEY,
@@ -228,8 +250,9 @@ RISK_TOOLS = [
 #-------------------
 
 def support_agent_node(state: SupportAgentState):
-    response = client.models.generate_content(
-        model=gemini_model,
+
+
+    respone = _generate_content(
         contents=state["messages"],
         config=types.GenerateContentConfig(
             system_instruction=(
@@ -250,6 +273,7 @@ def support_agent_node(state: SupportAgentState):
             ],
         ),
     )
+
 
     _record_gemini_usage(state["conversation_id"], response)
     _log_generation(state["correlation_id"], "support_agent_step", state["messages"][-1], response)
@@ -293,14 +317,13 @@ def support_tools_node(state: SupportAgentState):
     return {"messages": [types.Content(role="user", parts=tool_results)]}
 
 def support_finalize_node(state: SupportAgentState):
-    response = client.models.generate_content(
-        model=gemini_model,
+    response = _generate_content(
         contents=state["messages"] + [
             types.Content(
                 role="user",
                 parts=[types.Part.from_text(
                     text="You have reached the step limit. Answer the customer now, "
-                         "in plain text, using whatever information you already gathered."
+                        "in plain text, using whatever information you already gathered."
                 )],
             )
         ],
@@ -323,7 +346,21 @@ def support_should_continue(state: SupportAgentState):
     return "tools"
 
 
+support_graph_builder = StateGraph(SupportAgentState)
+support_graph_builder.add_node("agent", support_agent_node)
+support_graph_builder.add_node("tools", support_tools_node)
+support_graph_builder.add_node("finalize", support_finalize_node)
 
+support_graph_builder.set_entry_point("agent")
+support_graph_builder.add_conditional_edges(
+    "agent",
+    support_should_continue,
+    {"tools": "tools", "finalize": "finalize", "stop": END},
+)
+support_graph_builder.add_edge("tools", "agent")
+support_graph_builder.add_edge("finalize", END)
+
+support_graph = support_graph_builder.compile()
 #-------------------
 
 def _publish_agent_log_event(conversation_id, event_type, message):
@@ -451,23 +488,6 @@ def _record_gemini_usage(conversation_id, response):
     )
 #-------------------
 
-support_graph_builder = StateGraph(SupportAgentState)
-support_graph_builder.add_node("agent", support_agent_node)
-support_graph_builder.add_node("tools", support_tools_node)
-support_graph_builder.add_node("finalize", support_finalize_node)
-
-support_graph_builder.set_entry_point("agent")
-support_graph_builder.add_conditional_edges(
-    "agent",
-    support_should_continue,
-    {"tools": "tools", "finalize": "finalize", "stop": END},
-)
-support_graph_builder.add_edge("tools", "agent")
-support_graph_builder.add_edge("finalize", END)
-
-support_graph = support_graph_builder.compile()
-#-------------------
-
 def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=None , correlation_id=None):
     if tool_name == "get_order_details":
         return get_order_details(order_id)
@@ -518,6 +538,8 @@ def run_support_agent(user_message, conversation_id, order_id, user_id, correlat
     langfuse.flush()
 
     return final_reply
+
+
 def run_manager_agent(case_summary , conversation_id , user_id , correlation_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
@@ -536,12 +558,10 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
 
     while True:
     
-            response = client.models.generate_content(
-                model=gemini_model,
+            response = _generate_content(
                 contents=manager_messages,
                 config=types.GenerateContentConfig(
-                    system_instruction=
-                        MANAGER_SYSTEM_PROMPT,
+                    system_instruction=MANAGER_SYSTEM_PROMPT,
                     tools=[
                         types.Tool(
                             function_declarations=[
@@ -549,12 +569,12 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
                                     name=tool["name"],
                                     description=tool["description"],
                                     parameters=tool["input_schema"]
-                                )
-                                for tool in MANAGER_TOOLS
-                            ]
-                        )
-                    ]
-                )
+                             )
+                             for tool in MANAGER_TOOLS
+                          ]
+                      )
+                  ]
+             )
             )
             _record_gemini_usage(conversation_id, response)
 
@@ -595,7 +615,10 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
     
     
                 manager_messages.append(
-                    response.candidates[0].content
+                    types.Content(
+                        role="user",
+                        parts=[response.candidates[0].content]
+                    )
                 )
     
     
@@ -619,24 +642,22 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
     _create_log(conv, "risk", f"Starting fraud assessment for user {user_id}")
 
     risk_messages = [
-    types.Content(
-        role="user",
-        parts=[
-            types.Part.from_text(
-                text=f"Please assess the fraud risk for user ID {user_id}. Use your tool to get their profile and return a verdict."
+        types.Content(
+            role="user",
+            parts=[
+             types.Part.from_text(
+                    text=f"Please assess the fraud risk for user ID {user_id}. Use your tool to get their profile and return a verdict."
             )
-        ]
-    )
-]
+            ]
+        )
+    ]
 
     while True:
     
-            response = client.models.generate_content(
-                model=gemini_model,
+            response = _generate_content(
                 contents=risk_messages,
                 config=types.GenerateContentConfig(
-                    system_instruction=
-                        RISK_SYSTEM_PROMPT,
+                    system_instruction=RISK_SYSTEM_PROMPT,
                     tools=[
                         types.Tool(
                             function_declarations=[
@@ -654,8 +675,9 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
 
             _record_gemini_usage(conversation_id, response)
             _log_generation(correlation_id, "risk_agent_step", risk_messages[-1], response)   
+
             if response.function_calls:
-    
+
                 tool_results = []
     
                 for function_call in response.function_calls:
@@ -685,11 +707,12 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
     
     
                 risk_messages.append(
-                    response.candidates[0].content
+                    types.Content(
+                        role="user",
+                        parts=[response.candidates[0].content]
+                    )
                 )
     
-    
-          
                 risk_messages.append(
                     types.Content(
                         role="user",

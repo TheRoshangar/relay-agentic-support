@@ -164,6 +164,7 @@ LOGIN_URL = '/login/'
 
 GEMINI_API_KEY = config("GEMINI_API_KEY")
 GEMINI_MODEL = config("GEMINI_MODEL")
+GEMINI_FALLBACK_MODEL = config("GEMINI_FALLBACK_MODEL", default="gemini-2.0-flash")
 
 
 RABBITMQ_HOST = config("RABBITMQ_HOST", default="localhost")
