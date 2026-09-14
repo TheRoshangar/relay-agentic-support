@@ -160,3 +160,7 @@ RABBITMQ_PASSWORD = config("RABBITMQ_PASSWORD", default="guest")
 TAVILY_API_KEY = config("TAVILY_API_KEY")
 
 CHROMA_HOST = config("CHROMA_HOST", default="localhost")
+
+LANGFUSE_PUBLIC_KEY = config("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_SECRET_KEY = config("LANGFUSE_SECRET_KEY")
+LANGFUSE_HOST = config("LANGFUSE_HOST", default="https://cloud.langfuse.com")

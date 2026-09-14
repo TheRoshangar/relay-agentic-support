@@ -85,7 +85,7 @@ def publish_support_response(event_data):
 
 
 MAX_RETRIES = 3
-BASE_DELAY = 2  # ثانیه؛ فاصله‌ها می‌شن ۲، ۴، ۸
+BASE_DELAY = 2 
 
 
 def process_event(envelope):
@@ -112,6 +112,7 @@ def process_event(envelope):
                 conversation_id,
                 order_id,
                 user_id,
+                correlation_id,
             )
             break
         except Exception as e:

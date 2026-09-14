@@ -50,10 +50,15 @@
         <!-- Right: Agent Activity -->
         <div class="col-md-6" style="max-height: calc(100vh - 150px);">
           <div class="card h-100">
-            <div class="card-header d-flex align-items-center gap-2" style="font-size:13px;">
-              <div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;"></div>
-              <span class="fw-semibold">Agent Activity</span>
+            <div class="card-header d-flex align-items-center justify-content-between" style="font-size:13px;">
+              <div class="d-flex align-items-center gap-2">
+                <div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;"></div>
+                <span class="fw-semibold">Agent Activity</span>
             </div>
+            <span class="badge bg-light text-dark" style="font-size:11px;">
+                 Est. cost: ${{ conversation.estimated_cost_usd }}
+            </span>
+        </div>
             <div class="card-body overflow-auto" id="agent-activity">
 
               <!-- Log entry -->

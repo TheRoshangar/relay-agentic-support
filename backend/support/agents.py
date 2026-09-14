@@ -1,4 +1,5 @@
 
+from django.template import response
 from google import genai
 from django.conf import settings # type: ignore
 from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
@@ -11,6 +12,7 @@ from django.db.models import F
 
 from typing import TypedDict, Annotated
 import operator
+from langfuse import Langfuse
 from langgraph.graph import StateGraph, END # type: ignore
 
 
@@ -20,6 +22,7 @@ class SupportAgentState(TypedDict):
     conversation_id: int
     order_id: int
     user_id: int
+    correlation_id: str
     steps: int
 
 
@@ -29,6 +32,12 @@ client = genai.Client(
     api_key=settings.GEMINI_API_KEY
 )
 gemini_model = settings.GEMINI_MODEL
+
+langfuse = Langfuse(
+    public_key=settings.LANGFUSE_PUBLIC_KEY,
+    secret_key=settings.LANGFUSE_SECRET_KEY,
+    host=settings.LANGFUSE_HOST,
+)
 
 
 SUPPORT_SYSTEM_PROMPT = """
@@ -241,12 +250,14 @@ def support_agent_node(state: SupportAgentState):
             ],
         ),
     )
+
     _record_gemini_usage(state["conversation_id"], response)
+    _log_generation(state["correlation_id"], "support_agent_step", state["messages"][-1], response)
+
     return {
         "messages": [response.candidates[0].content],
         "steps": state["steps"] + 1,
     }
-
 
 def support_tools_node(state: SupportAgentState):
     conv = Conversation.objects.get(id=state["conversation_id"])
@@ -261,8 +272,16 @@ def support_tools_node(state: SupportAgentState):
         tool_args = dict(part.function_call.args)
 
         _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
-        result = execute_tool(tool_name, tool_args, state["conversation_id"] , order_id=state["order_id"],user_id=state["user_id"],)
+        result = execute_tool(
+            tool_name,
+            tool_args,
+            state["conversation_id"],
+            order_id=state["order_id"],
+            user_id=state["user_id"],
+            correlation_id=state["correlation_id"],
+        )
         _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
+        _log_tool_span(state["correlation_id"], tool_name, tool_args, result)
 
         tool_results.append(
             types.Part.from_function_response(
@@ -272,7 +291,6 @@ def support_tools_node(state: SupportAgentState):
         )
 
     return {"messages": [types.Content(role="user", parts=tool_results)]}
-
 
 def support_finalize_node(state: SupportAgentState):
     response = client.models.generate_content(
@@ -288,9 +306,11 @@ def support_finalize_node(state: SupportAgentState):
         ],
         config=types.GenerateContentConfig(system_instruction=SUPPORT_SYSTEM_PROMPT),
     )
-    _record_gemini_usage(state["conversation_id"], response)
-    return {"messages": [response.candidates[0].content]}
 
+    _record_gemini_usage(state["conversation_id"], response)
+    _log_generation(state["correlation_id"], "support_agent_finalize", state["messages"][-1], response)
+
+    return {"messages": [response.candidates[0].content]}
 
 def support_should_continue(state: SupportAgentState):
     last_content = state["messages"][-1]
@@ -381,6 +401,39 @@ def _create_log(conv, event_type, message):
 
     _publish_agent_log_event(conv.id, event_type, message)
 
+def _log_generation(correlation_id, name, model_input, response):
+
+    try:
+        langfuse.trace(id=correlation_id, name="support_conversation")
+
+        usage = getattr(response, "usage_metadata", None)
+        langfuse.generation(
+            trace_id=correlation_id,
+            name=name,
+            model=gemini_model,
+            input=str(model_input),
+            output=getattr(response, "text", None),
+            usage={
+                "input": getattr(usage, "prompt_token_count", 0) or 0,
+                "output": getattr(usage, "candidates_token_count", 0) or 0,
+            } if usage else None,
+        )
+    except Exception as e:
+        print(f"Langfuse generation logging failed: {e}", flush=True)
+
+
+def _log_tool_span(correlation_id, tool_name, tool_args, result):
+    try:
+        langfuse.trace(id=correlation_id, name="support_conversation")
+        langfuse.span(
+            trace_id=correlation_id,
+            name=f"tool:{tool_name}",
+            input=tool_args,
+            output=result,
+        )
+    except Exception as e:
+        print(f"Langfuse span logging failed: {e}", flush=True)
+
 
 def _record_gemini_usage(conversation_id, response):
     usage = getattr(response, "usage_metadata", None)
@@ -413,7 +466,7 @@ support_graph_builder.add_edge("finalize", END)
 support_graph = support_graph_builder.compile()
 #-------------------
 
-def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=None):
+def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=None , correlation_id=None):
     if tool_name == "get_order_details":
         return get_order_details(order_id)
     elif tool_name == "get_refund_history":
@@ -422,10 +475,10 @@ def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=
         return check_delivery_status(input_tool["tracking_number"], input_tool["carrier"])
     elif tool_name == "escalate_to_manager":
         case_summary = input_tool["case_summary"]
-        decision = run_manager_agent(case_summary, conversation_id, user_id)
+        decision = run_manager_agent(case_summary, conversation_id, user_id , correlation_id)
         return decision
     elif tool_name == "assess_fraud_risk":
-        verdict = run_risk_agent(user_id, conversation_id)
+        verdict = run_risk_agent(user_id, conversation_id, correlation_id)
         return verdict
     elif tool_name == "get_customer_risk_profile":
         return get_customer_risk_profile(user_id)
@@ -438,7 +491,7 @@ def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=
 #-------------------
     
     
-def run_support_agent(user_message, conversation_id, order_id, user_id):
+def run_support_agent(user_message, conversation_id, order_id, user_id, correlation_id):
     conv = Conversation.objects.get(id=conversation_id)
     conversation_messages = []
 
@@ -452,6 +505,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
         "conversation_id": conversation_id,
         "order_id": order_id,
         "user_id": user_id,
+        "correlation_id": correlation_id,
         "steps": 0,
     })
 
@@ -459,9 +513,10 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
     final_reply = "".join(part.text for part in last_content.parts if part.text)
 
     _create_log(conv, "final", final_reply)
-    return final_reply
+    langfuse.flush()
 
-def run_manager_agent(case_summary , conversation_id , user_id) :
+    return final_reply
+def run_manager_agent(case_summary , conversation_id , user_id , correlation_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
 
@@ -500,6 +555,8 @@ def run_manager_agent(case_summary , conversation_id , user_id) :
                 )
             )
             _record_gemini_usage(conversation_id, response)
+
+            _log_generation(correlation_id, "manager_agent_step", manager_messages[-1], response)
     
     
    
@@ -521,6 +578,7 @@ def run_manager_agent(case_summary , conversation_id , user_id) :
                         tool_args,
                         conversation_id,
                         user_id=user_id,
+                        correlation_id=correlation_id
                     )
     
     
@@ -553,7 +611,7 @@ def run_manager_agent(case_summary , conversation_id , user_id) :
                 _create_log(conv, "manager", f"Decision: {decision[:200]}")
                 return decision
 
-def run_risk_agent(user_id , conversation_id) :
+def run_risk_agent(user_id , conversation_id , correlation_id) :
 
     conv = Conversation.objects.get(id=conversation_id)
     _create_log(conv, "risk", f"Starting fraud assessment for user {user_id}")
@@ -593,7 +651,7 @@ def run_risk_agent(user_id , conversation_id) :
             )
 
             _record_gemini_usage(conversation_id, response)
-   
+            _log_generation(correlation_id, "risk_agent_step", risk_messages[-1], response)   
             if response.function_calls:
     
                 tool_results = []
@@ -610,6 +668,7 @@ def run_risk_agent(user_id , conversation_id) :
                         tool_args,
                         conversation_id,
                         user_id=user_id,
+                        correlation_id=correlation_id
                     )
     
     

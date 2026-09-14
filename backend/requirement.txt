@@ -14,3 +14,4 @@ chromadb
 pypdf
 tavily-python
 langgraph
+langfuse
