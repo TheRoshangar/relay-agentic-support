@@ -92,9 +92,7 @@ def get_customer_risk_profile(user_id):
     }
 
 def search_knowledge_base(query):
-
-    result = rag_search(query)
-    return {"result": result}
+    return rag_search(query)
 
 
 tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
