@@ -46,6 +46,16 @@ def get_refund_history(user_id):
 
 
 def check_delivery_status(tracking_number , carrier) : 
+
+    if not isinstance(tracking_number, str) or not (1 <= len(tracking_number.strip()) <= 40):
+        return {"error": "Invalid tracking number."}
+
+    if not isinstance(carrier, str) or not (1 <= len(carrier.strip()) <= 40):
+        return {"error": "Invalid carrier."}
+
+    tracking_number = tracking_number.strip()
+    carrier = carrier.strip()
+    
     default_response = {
         "status": "Unknown",
         "last_location": "Tracking info unavailable",
