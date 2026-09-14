@@ -44,15 +44,32 @@ def publish_support_event(event_data):
             host=settings.RABBITMQ_HOST,
             port=settings.RABBITMQ_PORT,
             credentials=credentials,
+            heartbeat=600,
+            blocked_connection_timeout=600,
         )
     )
 
     try:
         channel = connection.channel()
 
+        channel.exchange_declare(
+            exchange="support_events_dlx",
+            exchange_type="fanout",
+            durable=True,
+        )
+        channel.queue_declare(
+            queue="support_events_dlq",
+            durable=True,
+        )
+        channel.queue_bind(
+            exchange="support_events_dlx",
+            queue="support_events_dlq",
+        )
+
         channel.queue_declare(
             queue="support_events",
             durable=True,
+            arguments={"x-dead-letter-exchange": "support_events_dlx"},
         )
 
         channel.basic_publish(

@@ -21,8 +21,8 @@ django.setup()
 
 
 from django.shortcuts import get_object_or_404
-from support.agents import run_support_agent
-from support.models import Conversation, Message
+from support.agents import run_support_agent # type: ignore
+from support.models import Conversation, Message # type: ignore
 
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
@@ -83,6 +83,31 @@ def publish_support_response(event_data):
     finally:
         connection.close()
 
+DLX_NAME = "support_events_dlx"
+DLQ_NAME = "support_events_dlq"
+
+
+def declare_events_queue(channel):
+   
+    channel.exchange_declare(
+        exchange=DLX_NAME,
+        exchange_type="fanout",
+        durable=True,
+    )
+    channel.queue_declare(
+        queue=DLQ_NAME,
+        durable=True,
+    )
+    channel.queue_bind(
+        exchange=DLX_NAME,
+        queue=DLQ_NAME,
+    )
+
+    channel.queue_declare(
+        queue=QUEUE_NAME,
+        durable=True,
+        arguments={"x-dead-letter-exchange": DLX_NAME},
+    )
 
 MAX_RETRIES = 3
 BASE_DELAY = 2 
@@ -196,10 +221,7 @@ def main():
 
     channel = connection.channel()
 
-    channel.queue_declare(
-        queue=QUEUE_NAME,
-        durable=True,
-    )
+    declare_events_queue(channel)
 
     channel.basic_qos(
         prefetch_count=1
