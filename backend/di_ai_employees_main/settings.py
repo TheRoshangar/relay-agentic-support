@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'support',
     'rest_framework',
     'corsheaders',
+    'drf_spectacular',
 ]
 
 MIDDLEWARE = [
@@ -71,6 +72,17 @@ TEMPLATES = [
         },
     },
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Relay — CoolBreeze AC Support API',
+    'DESCRIPTION': 'API for the AI-agent-based customer support assistant (orders, chat, documents).',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
 
 WSGI_APPLICATION = 'di_ai_employees_main.wsgi.application'
 
