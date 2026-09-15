@@ -1,6 +1,7 @@
 import chromadb # type: ignore
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction # type: ignore
-
+from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
+from .models import DocumentChunk
 import os
 from pypdf import PdfReader # type: ignore
 
@@ -65,6 +66,11 @@ def load_documents():
                     "document": filename,
                     "chunk_index": i,
                 })
+                DocumentChunk.objects.update_or_create(
+                    document=filename,
+                    chunk_index=i,
+                    defaults={"content": chunk},
+)
 
     if documents:
         collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
@@ -72,7 +78,7 @@ def load_documents():
     print(f"Loaded {len(documents)} chunks into ChromaDB")
 
 
-def search_knowledge_base(query):
+
     results = collection.query(
         query_texts=[query],
         n_results=3,
@@ -82,20 +88,80 @@ def search_knowledge_base(query):
     matched_docs = results["documents"][0]
     matched_metas = results["metadatas"][0]
 
-    if not matched_docs:
-        return {
-            "source": "internal_document",
-            "results": [],
-        }
+
 
     formatted_results = []
-    for content, meta in zip(matched_docs, matched_metas):
-        formatted_results.append({
-            "document": meta.get("document", "unknown"),
-            "content": content,
-        })
+    if not matched_docs:
+        for content, meta in zip(matched_docs, matched_metas):
+            formatted_results.append({
+                "document": meta.get("document", "unknown"),
+                "content": content,
+            })
 
     return {
         "source": "internal_document",
         "results": formatted_results,
     }
+
+def search_knowledge_base(query):
+    vector_results = collection.query(
+        query_texts=[query],
+        n_results=3,
+        include=["documents", "metadatas"],
+    )
+
+    vector_matches = []
+    if vector_results["documents"][0]:
+        for content, meta in zip(vector_results["documents"][0], vector_results["metadatas"][0]):
+            vector_matches.append({
+                "document": meta.get("document", "unknown"),
+                "content": content,
+            })
+
+    text_matches = full_text_search(query, limit=3)
+
+    combined = {}
+
+    for i, match in enumerate(vector_matches):
+        key = match["document"] + "::" + match["content"][:50]
+        combined[key] = {**match, "matched_by": {"vector"}, "vector_rank": i}
+
+    for i, match in enumerate(text_matches):
+        key = match["document"] + "::" + match["content"][:50]
+        if key in combined:
+            combined[key]["matched_by"].add("full_text")
+            combined[key]["text_rank"] = i
+        else:
+            combined[key] = {**match, "matched_by": {"full_text"}, "text_rank": i}
+
+    def sort_key(item):
+        matched_both = len(item["matched_by"]) == 2
+        best_rank = min(item.get("vector_rank", 99), item.get("text_rank", 99))
+        return (0 if matched_both else 1, best_rank)
+
+    ranked = sorted(combined.values(), key=sort_key)[:5]
+
+    formatted_results = [
+        {"document": r["document"], "content": r["content"]}
+        for r in ranked
+    ]
+
+    if not formatted_results:
+        return {"source": "internal_document", "results": []}
+
+    return {"source": "internal_document", "results": formatted_results}
+
+
+def full_text_search(query, limit=3):
+    search_query = SearchQuery(query)
+    results = (
+        DocumentChunk.objects.annotate(
+            rank=SearchRank(SearchVector("content"), search_query)
+        )
+        .filter(rank__gt=0)
+        .order_by("-rank")[:limit]
+    )
+    return [
+        {"document": r.document, "content": r.content}
+        for r in results
+    ]

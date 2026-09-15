@@ -76,3 +76,15 @@ class ProcessedEvent(models.Model):
 
     def __str__(self):
         return f"{self.event_type} - {self.event_id}"
+
+class DocumentChunk(models.Model):
+    document = models.CharField(max_length=255)
+    chunk_index = models.IntegerField()
+    content = models.TextField()
+
+    class Meta:
+        unique_together = ("document", "chunk_index")
+
+    def __str__(self):
+        return f"{self.document}#{self.chunk_index}"
+    
