@@ -10,3 +10,4 @@ pypdf
 tavily-python
 langgraph
 langfuse
+drf-spectacular

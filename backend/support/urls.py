@@ -15,4 +15,7 @@ urlpatterns = [
 
     path('events/', views.support_events, name='support_events'),
     path('conversation-events/<int:conversation_id>/', views.conversation_events, name='conversation_events'),
+
+
+    path('feedback/', views.submit_feedback, name='submit_feedback'),
 ]

@@ -151,10 +151,11 @@ def process_event(envelope):
 
     conversation = get_object_or_404(Conversation, id=conversation_id)
 
-    Message.objects.create(
+    reply_message = Message.objects.create(
         conversation=conversation,
         role="model",
         content=reply,
+        correlation_id=correlation_id,
     )
 
     mark_event_processed(event_id, envelope["type"])
@@ -166,6 +167,7 @@ def process_event(envelope):
             "order_id": order_id,
             "user_id": user_id,
             "reply": reply,
+            "reply_message_id": reply_message.id
         },
         correlation_id=correlation_id,
     )

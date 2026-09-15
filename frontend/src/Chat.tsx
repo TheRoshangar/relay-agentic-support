@@ -25,6 +25,8 @@ type ChatProps = {
   chatLoading: boolean
   onMessageChange: (value: string) => void
   onSendMessage: () => void
+  onFeedback: (messageId: number, score: 1 | -1) => void
+  feedbackGiven: Record<number, 1 | -1>
 }
 
 function Chat({
@@ -35,6 +37,9 @@ function Chat({
   chatLoading,
   onMessageChange,
   onSendMessage,
+  onFeedback,
+  feedbackGiven,
+  
 }: ChatProps) {
   return (
     <div>
@@ -66,6 +71,31 @@ function Chat({
             </strong>
 
             <p>{msg.content}</p>
+
+            {msg.role === 'model' && msg.id && (
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  onClick={() => onFeedback(msg.id!, 1)}
+                  disabled={feedbackGiven[msg.id] !== undefined}
+                  style={{
+                   opacity: feedbackGiven[msg.id] === 1 ? 1 : feedbackGiven[msg.id] !== undefined ? 0.4 : 1,
+                    fontWeight: feedbackGiven[msg.id] === 1 ? 'bold' : 'normal',
+                  }}
+                >
+                  👍
+                </button>
+                <button
+                  onClick={() => onFeedback(msg.id!, -1)}
+                  disabled={feedbackGiven[msg.id] !== undefined}
+                  style={{
+                    opacity: feedbackGiven[msg.id] === -1 ? 1 : feedbackGiven[msg.id] !== undefined ? 0.4 : 1,
+                    fontWeight: feedbackGiven[msg.id] === -1 ? 'bold' : 'normal',
+                  }}
+                >
+                  👎
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

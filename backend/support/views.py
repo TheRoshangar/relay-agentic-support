@@ -19,7 +19,10 @@ from rest_framework.permissions import IsAuthenticated
 
 from .event_stream import get_events, get_conversation_events, publish_conversation_event
 
+from langfuse import get_client # type: ignore
+from django.conf import settings
 
+langfuse_client = get_client()
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -37,20 +40,6 @@ def chat(request, order_id):
             user=request.user,
             order=order
         )
-
-        Message.objects.create(
-            conversation=conversation,
-            role="user",
-            content=user_message
-        )
-
-        publish_conversation_event({
-            "type": "user_message",
-            "conversation_id": conversation.id,
-            "role": "user",
-            "content": user_message,
-        })
-
         envelope = build_envelope(
             event_type="process_support_message",
             payload={
@@ -60,6 +49,20 @@ def chat(request, order_id):
                 "message": user_message,
             },
         )
+
+        Message.objects.create(
+            conversation=conversation,
+            role="user",
+            content=user_message,
+            correlation_id=envelope["correlation_id"],
+        )
+
+        publish_conversation_event({
+            "type": "user_message",
+            "conversation_id": conversation.id,
+            "role": "user",
+            "content": user_message,
+        })
 
         publish_support_event(envelope)
 
@@ -197,3 +200,38 @@ async def conversation_events(request, conversation_id):
     response["Cache-Control"] = "no-cache"
 
     return response
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_feedback(request):
+    message_id = request.data.get("message_id")
+    score = request.data.get("score") 
+    comment = request.data.get("comment", "")
+
+    if score not in (1, -1):
+        return JsonResponse({"error": "score must be 1 or -1"}, status=400)
+
+    message = get_object_or_404(
+        Message,
+        id=message_id,
+        role="model",
+        conversation__user=request.user,
+    )
+
+    if not message.correlation_id:
+        return JsonResponse({"error": "No trace linked to this message"}, status=400)
+
+    try:
+        trace_id = langfuse_client.create_trace_id(seed=message.correlation_id)
+        langfuse_client.create_score(
+            trace_id=trace_id,
+            name="user_feedback",
+            value=float(score),
+            data_type="NUMERIC",
+            comment=comment,
+        )
+        langfuse_client.flush()
+    except Exception as e:
+        return JsonResponse({"error": f"Failed to record feedback: {e}"}, status=502)
+
+    return JsonResponse({"status": "recorded"})

@@ -1,6 +1,4 @@
 
-from django.db.migrations import state
-from django.template import response
 from google import genai
 from django.conf import settings # type: ignore
 from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
@@ -252,7 +250,7 @@ RISK_TOOLS = [
 def support_agent_node(state: SupportAgentState):
 
 
-    respone = _generate_content(
+    response = _generate_content(
         contents=state["messages"],
         config=types.GenerateContentConfig(
             system_instruction=(
@@ -518,6 +516,8 @@ def run_support_agent(user_message, conversation_id, order_id, user_id, correlat
     conversation_messages = []
 
     for msg in conv.messages.order_by("created_at"):
+        if not msg.content or not msg.content.strip():
+            continue
         conversation_messages.append(
             types.Content(role=msg.role, parts=[types.Part.from_text(text=msg.content)])
         )

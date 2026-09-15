@@ -57,6 +57,8 @@ function Conversation() {
   const [chatLoading, setChatLoading] = useState(false)
   const [conversationLoading, setConversationLoading] = useState(false)
 
+ 
+
   type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'failed'
 
   const [connectionStatus, setConnectionStatus] =
@@ -74,6 +76,9 @@ function Conversation() {
   const [csrfToken, setCsrfToken] = useState('')
 
   const chatRef = useRef<HTMLDivElement | null>(null)
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<number, 1 | -1>>({})
+
+
 
 
   useEffect(() => {
@@ -154,7 +159,7 @@ function Conversation() {
       if (data.type === 'support_response') {
         setMessages((previous) => [
           ...previous,
-        { role: 'model', content: data.reply },
+        { id: data.reply_message_id,role: 'model', content: data.reply },
         ])
         setChatLoading(false)
       }
@@ -297,6 +302,34 @@ function Conversation() {
     // مشکلی نیست، دفعه‌ی بعد که وصل بشه دوباره امتحان می‌کنیم
     }
   }
+  
+  const sendFeedback = async (messageId: number, score: 1 | -1) => {
+    if (!csrfToken) return
+
+    try {
+      const response = await fetch('http://localhost:8000/support/feedback/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({
+          message_id: messageId,
+          score,
+        }),
+     })
+
+    if (response.ok) {
+      setFeedbackGiven((previous) => ({
+        ...previous,
+        [messageId]: score,
+      }))
+    }
+  } catch {
+    // بازخورد یه ویژگی جانبیه، شکستش نباید تجربه‌ی چت رو خراب کنه
+  }
+}
 
 
 
@@ -357,14 +390,6 @@ function Conversation() {
       if (!response.ok) {
         throw new Error('Failed to send message')
       }
-
-
-
-      // مهم:
-      // اینجا دیگر جواب AI را اضافه نمی‌کنیم
-      // جواب از SSE می‌آید
-
-
 
     } catch (error) {
 
@@ -433,7 +458,8 @@ function Conversation() {
             onMessageChange={setMessage}
 
             onSendMessage={sendMessage}
-
+            onFeedback={sendFeedback}
+            feedbackGiven={feedbackGiven}
           />
 
         </div>
