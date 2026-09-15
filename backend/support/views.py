@@ -5,6 +5,7 @@ from .models import Conversation , Message
 
 
 from django.http import StreamingHttpResponse
+from orders.permissions import is_support_agent
 
 from .events import publish_support_event , build_envelope
 
@@ -77,9 +78,11 @@ def chat(request, order_id):
 
 @api_view(["GET"])
 def dashboard(request):
-    conversations = Conversation.objects.filter(
-        user=request.user
-    ).order_by("-created_at")
+    if is_support_agent(request.user):
+        conversations = Conversation.objects.all().order_by("-created_at")
+    else:
+        conversations = Conversation.objects.filter(user=request.user).order_by("-created_at")
+
 
     data = []
 
@@ -98,11 +101,10 @@ def dashboard(request):
 @api_view(["GET"])
 def conversation_detail(request, conversation_id):
 
-    conversation = get_object_or_404(
-    Conversation,
-    id=conversation_id,
-    user=request.user
-    )
+    if is_support_agent(request.user):
+        conversation = get_object_or_404(Conversation, id=conversation_id)
+    else:
+        conversation = get_object_or_404(Conversation, id=conversation_id, user=request.user)
 
     messages = conversation.messages.order_by("created_at")
     agentlogs = conversation.agentlogs.order_by("created_at")
