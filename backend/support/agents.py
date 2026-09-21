@@ -614,12 +614,7 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
                     )
     
     
-                manager_messages.append(
-                    types.Content(
-                        role="user",
-                        parts=[response.candidates[0].content]
-                    )
-                )
+                manager_messages.append(response.candidates[0].content)
     
     
           
@@ -706,12 +701,8 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
                     )
     
     
-                risk_messages.append(
-                    types.Content(
-                        role="user",
-                        parts=[response.candidates[0].content]
-                    )
-                )
+                risk_messages.append(response.candidates[0].content)
+
     
                 risk_messages.append(
                     types.Content(
