@@ -20,26 +20,35 @@ function OrderList({
   onSelectOrder,
 }: OrderListProps) {
   return (
-    <div>
-      <h2>Orders</h2>
+    <div className="sidebar-section">
+      <div className="sidebar-section-heading">
+        <h2>Orders</h2>
+      </div>
 
-      {orders.map((order) => (
-        <div key={order.id}>
-          <h3>{order.product_name}</h3>
+      {orders.length === 0 && (
+        <p className="empty-state">No orders yet.</p>
+      )}
 
-          <p>Order ID: {order.id}</p>
-          <p>Status: {order.status}</p>
-          <p>Amount: {order.amount}</p>
-
+      <div className="list-stack">
+        {orders.map((order) => (
           <button
+            key={order.id}
+            className="order-card"
             onClick={() => onSelectOrder(order)}
           >
-            Start new chat
-          </button>
+            <div className="order-card-title">
+              {order.product_name}
+            </div>
 
-          <hr />
-        </div>
-      ))}
+            <div className="order-card-meta">
+              <span className="order-card-id readout">
+                #{order.id} · {order.amount}
+              </span>
+              <span className="status-pill">{order.status}</span>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

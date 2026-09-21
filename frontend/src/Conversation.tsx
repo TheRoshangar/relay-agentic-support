@@ -41,7 +41,7 @@ type ConversationDetail = {
 
 function Conversation() {
 
-  const [orders, setOrders] = useState<Order[]>([])
+  const [orders , setOrders] = useState<Order[]>([])
   const [conversations, setConversations] = useState<ConversationType[]>([])
   const [error, setError] = useState('')
 
@@ -178,13 +178,7 @@ function Conversation() {
       else {
         setConnectionStatus('reconnecting')
       }
-}
 
-
-    
-
-
-    eventSource.onerror = () => {
       console.log('SSE connection error')
     }
 
@@ -407,41 +401,44 @@ function Conversation() {
 
 
 
+  const statusLabel =
+    connectionStatus === 'connected' ? 'Connected' :
+    connectionStatus === 'connecting' ? 'Connecting…' :
+    connectionStatus === 'reconnecting' ? 'Reconnecting…' :
+    'Connection lost — refresh the page'
+
   return (
 
-    <div>
+    <div className="page-conversation">
 
-      <div style={{ marginBottom: '8px', fontSize: '14px' }}>
-          {connectionStatus === 'connected' && '🟢 Connected'}
-          {connectionStatus === 'connecting' && '🟡 Connecting...'}
-          {connectionStatus === 'reconnecting' && '🟠 Reconnecting...'}
-          {connectionStatus === 'failed' && '🔴 Connection lost — please refresh the page'}
-      </div>
+      <aside className="sidebar">
 
-      <h1>Conversation</h1>
+        <div className="status-row">
+          <span className={`status-dot status-dot--${connectionStatus}`} />
+          {statusLabel}
+        </div>
 
+        {error && <div className="error-banner">{error}</div>}
 
-      {error && <p>{error}</p>}
+        <ConversationList
+          conversations={conversations}
+          loading={conversationLoading}
+          onSelectConversation={loadConversation}
+        />
 
+        <OrderList
+          orders={orders}
+          onSelectOrder={startNewChat}
+        />
 
-      <ConversationList
-        conversations={conversations}
-        loading={conversationLoading}
-        onSelectConversation={loadConversation}
-      />
+      </aside>
 
+      {selectedOrder ? (
 
-
-      <OrderList
-        orders={orders}
-        onSelectOrder={startNewChat}
-      />
-
-
-
-      {selectedOrder && (
-
-        <div ref={chatRef}>
+        <div
+          ref={chatRef}
+          style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}
+        >
 
           <Chat
 
@@ -462,6 +459,13 @@ function Conversation() {
             feedbackGiven={feedbackGiven}
           />
 
+        </div>
+
+      ) : (
+
+        <div className="chat-empty">
+          Pick an order on the left to start a new chat, or open a
+          previous conversation.
         </div>
 
       )}

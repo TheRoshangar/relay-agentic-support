@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 type Message = {
   id?: number
   role: 'user' | 'model'
@@ -39,58 +41,80 @@ function Chat({
   onSendMessage,
   onFeedback,
   feedbackGiven,
-  
 }: ChatProps) {
+  const messageListRef = useRef<HTMLDivElement | null>(null)
+
+  // Always keep the view pinned to the latest message: on first render,
+  // whenever a new message is added, and whenever the selected
+  // conversation changes.
+  useEffect(() => {
+    const el = messageListRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, selectedConversation])
+
   return (
-    <div>
-      <h2>Chat</h2>
+    <div className="chat-panel">
+      <div className="chat-header">
+        <div>
+          <div className="chat-header-title">
+            {selectedOrder.product_name}
+          </div>
+          <div className="chat-header-meta readout">
+            Order #{selectedOrder.id}
+            {selectedConversation && ` · Conversation #${selectedConversation.id}`}
+          </div>
+        </div>
+      </div>
 
-      <p>
-        Order #{selectedOrder.id} -{' '}
-        {selectedOrder.product_name}
-      </p>
-
-      {selectedConversation && (
-        <p>
-          Conversation #{selectedConversation.id}
-        </p>
-      )}
-
-      <div>
+      <div className="message-list" ref={messageListRef}>
         {messages.length === 0 && (
-          <p>No messages yet.</p>
+          <p className="empty-state">
+            No messages yet. Say hello to Maya below.
+          </p>
         )}
 
         {messages.map((msg, index) => (
-          <div key={msg.id ?? index}>
-            <strong>
-              {msg.role === 'user'
-                ? 'You'
-                : 'Maya'}
-              :
-            </strong>
+          <div
+            key={msg.id ?? index}
+            className={
+              "message-row " +
+              (msg.role === "user" ? "message-row--user" : "message-row--model")
+            }
+          >
+            <div className="message-label">
+              {msg.role === "user" ? "You" : "Maya"}
+            </div>
 
-            <p>{msg.content}</p>
+            <div className="message-bubble">{msg.content}</div>
 
-            {msg.role === 'model' && msg.id && (
-              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            {msg.role === "model" && msg.id && (
+              <div className="message-feedback">
                 <button
+                  className={
+                    "feedback-btn" +
+                    (feedbackGiven[msg.id] === 1 ? " is-picked" : "") +
+                    (feedbackGiven[msg.id] !== undefined && feedbackGiven[msg.id] !== 1
+                      ? " is-dimmed"
+                      : "")
+                  }
                   onClick={() => onFeedback(msg.id!, 1)}
                   disabled={feedbackGiven[msg.id] !== undefined}
-                  style={{
-                   opacity: feedbackGiven[msg.id] === 1 ? 1 : feedbackGiven[msg.id] !== undefined ? 0.4 : 1,
-                    fontWeight: feedbackGiven[msg.id] === 1 ? 'bold' : 'normal',
-                  }}
+                  aria-label="Helpful reply"
                 >
                   👍
                 </button>
                 <button
+                  className={
+                    "feedback-btn" +
+                    (feedbackGiven[msg.id] === -1 ? " is-picked" : "") +
+                    (feedbackGiven[msg.id] !== undefined && feedbackGiven[msg.id] !== -1
+                      ? " is-dimmed"
+                      : "")
+                  }
                   onClick={() => onFeedback(msg.id!, -1)}
                   disabled={feedbackGiven[msg.id] !== undefined}
-                  style={{
-                    opacity: feedbackGiven[msg.id] === -1 ? 1 : feedbackGiven[msg.id] !== undefined ? 0.4 : 1,
-                    fontWeight: feedbackGiven[msg.id] === -1 ? 'bold' : 'normal',
-                  }}
+                  aria-label="Unhelpful reply"
                 >
                   👎
                 </button>
@@ -100,26 +124,29 @@ function Chat({
         ))}
       </div>
 
-      <input
-        type="text"
-        value={message}
-        onChange={(event) =>
-          onMessageChange(event.target.value)
-        }
-        placeholder="Type your message..."
-        disabled={chatLoading}
-      />
+      <div className="chat-composer">
+        <input
+          className="chat-input"
+          type="text"
+          value={message}
+          onChange={(event) => onMessageChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !chatLoading && message.trim()) {
+              onSendMessage()
+            }
+          }}
+          placeholder="Type your message..."
+          disabled={chatLoading}
+        />
 
-      <button
-        onClick={onSendMessage}
-        disabled={
-          chatLoading || !message.trim()
-        }
-      >
-        {chatLoading
-          ? 'Sending...'
-          : 'Send'}
-      </button>
+        <button
+          className="primary-button send-button"
+          onClick={onSendMessage}
+          disabled={chatLoading || !message.trim()}
+        >
+          {chatLoading ? "Sending..." : "Send"}
+        </button>
+      </div>
     </div>
   )
 }

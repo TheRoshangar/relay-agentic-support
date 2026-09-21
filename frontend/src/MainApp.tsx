@@ -8,21 +8,38 @@ function MainApp() {
   )
 
   return (
-    <div>
-      <nav>
-        <button onClick={() => setPage("conversation")}>
-          Conversation
-        </button>
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-glyph">CB</div>
+          <div className="brand-text">
+            CoolBreeze AC
+            <span>Support console</span>
+          </div>
+        </div>
 
-        <button onClick={() => setPage("documents")}>
-          Documents
-        </button>
-      </nav>
+        <nav className="tab-nav">
+          <button
+            className={
+              "tab-button" + (page === "conversation" ? " active" : "")
+            }
+            onClick={() => setPage("conversation")}
+          >
+            Conversation
+          </button>
 
-      <hr />
+          <button
+            className={
+              "tab-button" + (page === "documents" ? " active" : "")
+            }
+            onClick={() => setPage("documents")}
+          >
+            Documents
+          </button>
+        </nav>
+      </header>
 
       {page === "conversation" && <Conversation />}
-
       {page === "documents" && <Documents />}
     </div>
   )

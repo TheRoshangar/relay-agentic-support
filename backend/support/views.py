@@ -15,6 +15,9 @@ from rest_framework.response import Response
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from rest_framework.permissions import IsAuthenticated
+import os
+from django.http import FileResponse, Http404
+from django.contrib.auth.decorators import login_required
 
 
 
@@ -237,3 +240,29 @@ def submit_feedback(request):
         return JsonResponse({"error": f"Failed to record feedback: {e}"}, status=502)
 
     return JsonResponse({"status": "recorded"})
+
+
+DOCUMENTS_DIR = os.path.join(settings.BASE_DIR, "support", "documents")
+
+ALLOWED_DOCUMENTS = {
+    "product_faq.pdf",
+    "warranty_policy.pdf",
+    "refund_policy.pdf",
+}
+
+
+@login_required
+def download_document(request, filename):
+    if filename not in ALLOWED_DOCUMENTS:
+        raise Http404("Document not found")
+
+    file_path = os.path.join(DOCUMENTS_DIR, filename)
+    if not os.path.isfile(file_path):
+        raise Http404("Document not found")
+
+    return FileResponse(
+        open(file_path, "rb"),
+        as_attachment=True,
+        filename=filename,
+        content_type="application/pdf",
+    )

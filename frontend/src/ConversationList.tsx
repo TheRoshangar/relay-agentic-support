@@ -19,41 +19,34 @@ function ConversationList({
   onSelectConversation,
 }: ConversationListProps) {
   return (
-    <div>
-      <h2>Previous Conversations</h2>
+    <div className="sidebar-section">
+      <div className="sidebar-section-heading">
+        <h2>Previous conversations</h2>
+      </div>
 
       {conversations.length === 0 && (
-        <p>No previous conversations.</p>
+        <p className="empty-state">No previous conversations.</p>
       )}
 
-      {conversations.map((conversation) => (
-        <div key={conversation.id}>
-          <p>
-            <strong>
-              Conversation #{conversation.id}
-            </strong>
-          </p>
-
-          <p>Order #{conversation.order_id}</p>
-
-          <p>
-            Created: {conversation.created_at}
-          </p>
-
+      <div className="list-stack">
+        {conversations.map((conversation) => (
           <button
-            onClick={() =>
-              onSelectConversation(conversation)
-            }
+            key={conversation.id}
+            className="conversation-card"
+            onClick={() => onSelectConversation(conversation)}
             disabled={loading}
           >
-            {loading
-              ? 'Loading...'
-              : 'Open conversation'}
-          </button>
+            <div className="conversation-card-title">
+              Conversation #{conversation.id}
+              <span className="readout"> · Order #{conversation.order_id}</span>
+            </div>
 
-          <hr />
-        </div>
-      ))}
+            <div className="conversation-card-meta">
+              {loading ? "Loading..." : conversation.created_at}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

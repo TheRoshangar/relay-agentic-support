@@ -13,9 +13,10 @@ urlpatterns = [
     path('dashboard-page/', views.dashboard_view, name="dashboard_page"),
     path('dashboard-page/<int:conversation_id>/', views.conversation_detail_view, name="conversation_detail_page"),
 
-    path('events/', views.support_events, name='support_events'),
     path('conversation-events/<int:conversation_id>/', views.conversation_events, name='conversation_events'),
 
 
+    path('events/', views.support_events, name='support_events'),
     path('feedback/', views.submit_feedback, name='submit_feedback'),
+    path("documents/<str:filename>/", views.download_document, name="download_document"),
 ]

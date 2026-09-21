@@ -57,35 +57,59 @@ function Login({ onLoginSuccess }: LoginProps) {
   }
 
   return (
-    <div>
-      <h1>Login</h1>
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-mark">
+          <div className="login-mark-glyph">CB</div>
+          <div className="login-mark-text">
+            CoolBreeze AC
+            <span>Support console</span>
+          </div>
+        </div>
 
-      {error && <p>{error}</p>}
+        <h1>Sign in</h1>
+        <p className="login-sub">
+          Use your account to view orders and talk to Maya.
+        </p>
 
-      <input
-        type="text"
-        placeholder="Username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-      />
+        {error && <div className="error-banner">{error}</div>}
 
-      <br />
+        <div className="field">
+          <label htmlFor="username">Username</label>
+          <input
+            id="username"
+            type="text"
+            placeholder="your.username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLogin()
+            }}
+          />
+        </div>
 
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+        <div className="field">
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLogin()
+            }}
+          />
+        </div>
 
-      <br />
-
-      <button
-        onClick={handleLogin}
-        disabled={loading}
-      >
-        {loading ? "Logging in..." : "Login"}
-      </button>
+        <button
+          className="primary-button"
+          onClick={handleLogin}
+          disabled={loading}
+        >
+          {loading ? "Signing in..." : "Sign in"}
+        </button>
+      </div>
     </div>
   )
 }
