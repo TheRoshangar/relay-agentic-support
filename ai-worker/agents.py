@@ -1,8 +1,8 @@
 
 from google import genai
 from django.conf import settings # type: ignore
-from .tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
-from .models import Conversation , Message , AgentLog
+from tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
+from support.models import Conversation , Message , AgentLog
 from google.genai import types
 
 import json

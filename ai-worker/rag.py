@@ -1,7 +1,7 @@
 import chromadb # type: ignore
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction # type: ignore
 from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
-from .models import DocumentChunk
+from support.models import DocumentChunk # type: ignore
 import os
 from pypdf import PdfReader # type: ignore
 
@@ -41,7 +41,7 @@ def chunk_text(text, chunk_size=500):
 
 
 def load_documents():
-    docs_path = "support/documents/"
+    docs_path = os.path.join(settings.BASE_DIR, "support", "documents")
 
     documents = []
     ids = []

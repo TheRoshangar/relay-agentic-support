@@ -1,13 +1,13 @@
 from datetime import timedelta
 
-from orders.models import Order , RefundRequest
+from orders.models import Order , RefundRequest 
 from django.utils import timezone
-from .tracking_data import DELIVERY_DATA
-from .rag import search_knowledge_base as rag_search
+from tracking_data import DELIVERY_DATA
+from rag import search_knowledge_base as rag_search
 from django.conf import settings
 from tavily import TavilyClient # type: ignore
 from django.db.models import F
-from .models import Conversation
+from support.models import Conversation
 
 def get_order_details(order_id) :
     try:

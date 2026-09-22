@@ -2,6 +2,7 @@ import json
 import os
 import sys
 sys.path.insert(0, "/backend")
+from django.template.backends import django
 import pika  # type: ignore
 import time
 
@@ -21,7 +22,7 @@ django.setup()
 
 
 from django.shortcuts import get_object_or_404
-from support.agents import run_support_agent # type: ignore
+from agents import run_support_agent # type: ignore
 from support.models import Conversation, Message # type: ignore
 
 
