@@ -172,3 +172,26 @@ def full_text_search_document_chunks(query, limit=3):
         "LIMIT %(limit)s",
         {"q": query, "limit": limit},
     )
+
+def is_duplicate_event(event_id):
+    row = _fetch_one(
+        """
+        SELECT id 
+        FROM support_processedevent
+        WHERE event_id = %s
+        """,
+        (event_id,),
+    )
+    return row is not None
+
+
+def mark_event_processed(event_id, event_type):
+    _execute(
+        """
+        INSERT INTO support_processedevent
+        (event_id, event_type, processed_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (event_id) DO NOTHING
+        """,
+        (event_id, event_type),
+    )

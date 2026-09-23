@@ -489,6 +489,7 @@ def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=
     
 def run_support_agent(user_message, conversation_id, order_id, user_id, correlation_id):
     conversation_messages = []
+    print("----->>>>> run support")
 
     for msg in db.get_conversation_messages(conversation_id):
         if not msg["content"] or not msg["content"].strip():
