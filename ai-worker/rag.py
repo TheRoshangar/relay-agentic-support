@@ -1,14 +1,14 @@
-import chromadb # type: ignore
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction # type: ignore
-from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
-from support.models import DocumentChunk # type: ignore
 import os
-from pypdf import PdfReader # type: ignore
 
-from django.conf import settings
+import chromadb  # type: ignore
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction  # type: ignore
+from pypdf import PdfReader  # type: ignore
+
+import config
+import db
 
 client = chromadb.HttpClient(
-    host=settings.CHROMA_HOST,
+    host=config.CHROMA_HOST,
     port=8000,
 )
 embedding_fn = DefaultEmbeddingFunction()
@@ -41,7 +41,7 @@ def chunk_text(text, chunk_size=500):
 
 
 def load_documents():
-    docs_path = os.path.join(settings.BASE_DIR, "support", "documents")
+    docs_path = os.path.join(os.path.dirname(__file__), "documents")
 
     documents = []
     ids = []
@@ -66,42 +66,13 @@ def load_documents():
                     "document": filename,
                     "chunk_index": i,
                 })
-                DocumentChunk.objects.update_or_create(
-                    document=filename,
-                    chunk_index=i,
-                    defaults={"content": chunk},
-)
+                db.upsert_document_chunk(filename, i, chunk)
 
     if documents:
         collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
 
     print(f"Loaded {len(documents)} chunks into ChromaDB")
 
-
-
-    results = collection.query(
-        query_texts=[query],
-        n_results=3,
-        include=["documents", "metadatas"],
-    )
-
-    matched_docs = results["documents"][0]
-    matched_metas = results["metadatas"][0]
-
-
-
-    formatted_results = []
-    if not matched_docs:
-        for content, meta in zip(matched_docs, matched_metas):
-            formatted_results.append({
-                "document": meta.get("document", "unknown"),
-                "content": content,
-            })
-
-    return {
-        "source": "internal_document",
-        "results": formatted_results,
-    }
 
 def search_knowledge_base(query):
     vector_results = collection.query(
@@ -153,15 +124,8 @@ def search_knowledge_base(query):
 
 
 def full_text_search(query, limit=3):
-    search_query = SearchQuery(query)
-    results = (
-        DocumentChunk.objects.annotate(
-            rank=SearchRank(SearchVector("content"), search_query)
-        )
-        .filter(rank__gt=0)
-        .order_by("-rank")[:limit]
-    )
+    rows = db.full_text_search_document_chunks(query, limit=limit)
     return [
-        {"document": r.document, "content": r.content}
-        for r in results
+        {"document": r["document"], "content": r["content"]}
+        for r in rows
     ]

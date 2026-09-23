@@ -1,13 +1,9 @@
 pika
-Django
 psycopg[binary]
 google-genai
 python-decouple
-djangorestframework
-django-cors-headers
 chromadb
 pypdf
 tavily-python
 langgraph
 langfuse
-drf-spectacular

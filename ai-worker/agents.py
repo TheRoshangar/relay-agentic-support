@@ -1,13 +1,11 @@
-
 from google import genai
-from django.conf import settings # type: ignore
+import config
 from tools import get_order_details , get_refund_history , check_delivery_status , get_customer_risk_profile , search_knowledge_base , search_web
-from support.models import Conversation , Message , AgentLog
 from google.genai import types
 
 import json
 import pika  # type: ignore
-from django.db.models import F
+import db
 
 from typing import TypedDict, Annotated
 import operator
@@ -28,18 +26,18 @@ class SupportAgentState(TypedDict):
 MAX_STEPS = 6
 
 client = genai.Client(
-    api_key=settings.GEMINI_API_KEY
+    api_key=config.GEMINI_API_KEY
 )
-gemini_model = settings.GEMINI_MODEL
-gemini_fallback_model = settings.GEMINI_FALLBACK_MODEL
+gemini_model = config.GEMINI_MODEL
+gemini_fallback_model = config.GEMINI_FALLBACK_MODEL
 
 
-def _generate_content(contents, config):
+def _generate_content(contents, config_):
     try:
         return client.models.generate_content(
             model=gemini_model,
             contents=contents,
-            config=config,
+            config=config_,
         )
     except Exception as e:
         if not gemini_fallback_model or gemini_fallback_model == gemini_model:
@@ -50,13 +48,13 @@ def _generate_content(contents, config):
         return client.models.generate_content(
             model=gemini_fallback_model,
             contents=contents,
-            config=config,
+            config=config_,
         )
 
 langfuse = Langfuse(
-    public_key=settings.LANGFUSE_PUBLIC_KEY,
-    secret_key=settings.LANGFUSE_SECRET_KEY,
-    host=settings.LANGFUSE_HOST,
+    public_key=config.LANGFUSE_PUBLIC_KEY,
+    secret_key=config.LANGFUSE_SECRET_KEY,
+    host=config.LANGFUSE_HOST,
 )
 
 
@@ -252,7 +250,7 @@ def support_agent_node(state: SupportAgentState):
 
     response = _generate_content(
         contents=state["messages"],
-        config=types.GenerateContentConfig(
+        config_=types.GenerateContentConfig(
             system_instruction=(
                 SUPPORT_SYSTEM_PROMPT
                 + f"\n\nContext: This conversation is about Order #{state['order_id']}, user: {state['user_id']}"
@@ -282,7 +280,6 @@ def support_agent_node(state: SupportAgentState):
     }
 
 def support_tools_node(state: SupportAgentState):
-    conv = Conversation.objects.get(id=state["conversation_id"])
     last_content = state["messages"][-1]
 
     tool_results = []
@@ -293,7 +290,7 @@ def support_tools_node(state: SupportAgentState):
         tool_name = part.function_call.name
         tool_args = dict(part.function_call.args)
 
-        _create_log(conv, "tool_call", f"Calling tool {tool_name} with {tool_args}")
+        _create_log(state["conversation_id"], "tool_call", f"Calling tool {tool_name} with {tool_args}")
         result = execute_tool(
             tool_name,
             tool_args,
@@ -302,7 +299,7 @@ def support_tools_node(state: SupportAgentState):
             user_id=state["user_id"],
             correlation_id=state["correlation_id"],
         )
-        _create_log(conv, "tool_result", f"{tool_name} returned: {str(result)[:200]}")
+        _create_log(state["conversation_id"], "tool_result", f"{tool_name} returned: {str(result)[:200]}")
         _log_tool_span(state["correlation_id"], tool_name, tool_args, result)
 
         tool_results.append(
@@ -325,7 +322,7 @@ def support_finalize_node(state: SupportAgentState):
                 )],
             )
         ],
-        config=types.GenerateContentConfig(system_instruction=SUPPORT_SYSTEM_PROMPT),
+        config_=types.GenerateContentConfig(system_instruction=SUPPORT_SYSTEM_PROMPT),
     )
 
     _record_gemini_usage(state["conversation_id"], response)
@@ -362,22 +359,15 @@ support_graph = support_graph_builder.compile()
 #-------------------
 
 def _publish_agent_log_event(conversation_id, event_type, message):
-    """
-    Publish an agent log event to the same RabbitMQ fanout exchange used
-    for final replies, tagged with type "agent_log" so the async consumer
-    on the backend side can route it to the admin panel's SSE stream
-    (publish_conversation_event), instead of the customer chat SSE stream.
-    """
-
     credentials = pika.PlainCredentials(
-        settings.RABBITMQ_USER,
-        settings.RABBITMQ_PASSWORD,
+        config.RABBITMQ_USER,
+        config.RABBITMQ_PASSWORD,
     )
 
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(
-            host=settings.RABBITMQ_HOST,
-            port=settings.RABBITMQ_PORT,
+            host=config.RABBITMQ_HOST,
+            port=config.RABBITMQ_PORT,
             credentials=credentials,
             heartbeat=600,
             blocked_connection_timeout=600,
@@ -421,20 +411,9 @@ def _publish_agent_log_event(conversation_id, event_type, message):
         connection.close()
 
 
-def _create_log(conv, event_type, message):
-    """
-    Save an AgentLog row (as before) AND publish it live to the admin
-    panel via RabbitMQ, so the "Agent Activity" panel updates in
-    real time instead of only after a page refresh.
-    """
-
-    AgentLog.objects.create(
-        conversation=conv,
-        event_type=event_type,
-        message=message,
-    )
-
-    _publish_agent_log_event(conv.id, event_type, message)
+def _create_log(conversation_id, event_type, message):
+    db.insert_agent_log(conversation_id, event_type, message)
+    _publish_agent_log_event(conversation_id, event_type, message)
 
 def _log_generation(correlation_id, name, model_input, response):
 
@@ -480,10 +459,7 @@ def _record_gemini_usage(conversation_id, response):
     input_tokens = getattr(usage, "prompt_token_count", 0) or 0
     output_tokens = getattr(usage, "candidates_token_count", 0) or 0
 
-    Conversation.objects.filter(id=conversation_id).update(
-        total_input_tokens=F("total_input_tokens") + input_tokens,
-        total_output_tokens=F("total_output_tokens") + output_tokens,
-    )
+    db.increment_conversation_tokens(conversation_id, input_tokens, output_tokens)
 #-------------------
 
 def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=None , correlation_id=None):
@@ -512,14 +488,13 @@ def execute_tool(tool_name, input_tool, conversation_id, order_id=None, user_id=
     
     
 def run_support_agent(user_message, conversation_id, order_id, user_id, correlation_id):
-    conv = Conversation.objects.get(id=conversation_id)
     conversation_messages = []
 
-    for msg in conv.messages.order_by("created_at"):
-        if not msg.content or not msg.content.strip():
+    for msg in db.get_conversation_messages(conversation_id):
+        if not msg["content"] or not msg["content"].strip():
             continue
         conversation_messages.append(
-            types.Content(role=msg.role, parts=[types.Part.from_text(text=msg.content)])
+            types.Content(role=msg["role"], parts=[types.Part.from_text(text=msg["content"])])
         )
 
     final_state = support_graph.invoke({
@@ -534,7 +509,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id, correlat
     last_content = final_state["messages"][-1]
     final_reply = "".join(part.text for part in last_content.parts if part.text)
 
-    _create_log(conv, "final", final_reply)
+    _create_log(conversation_id, "final", final_reply)
     langfuse.flush()
 
     return final_reply
@@ -542,9 +517,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id, correlat
 
 def run_manager_agent(case_summary , conversation_id , user_id , correlation_id) :
 
-    conv = Conversation.objects.get(id=conversation_id)
-
-    _create_log(conv, "manager", f"Case received for review: {case_summary[:200]}")
+    _create_log(conversation_id, "manager", f"Case received for review: {case_summary[:200]}")
 
 
     manager_messages = [
@@ -560,7 +533,7 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
     
             response = _generate_content(
                 contents=manager_messages,
-                config=types.GenerateContentConfig(
+                config_=types.GenerateContentConfig(
                     system_instruction=MANAGER_SYSTEM_PROMPT,
                     tools=[
                         types.Tool(
@@ -593,7 +566,7 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
 
 
 
-                    _create_log(conv, "manager", "Consulting risk agent for fraud assessment...")
+                    _create_log(conversation_id, "manager", "Consulting risk agent for fraud assessment...")
 
                     result = execute_tool(
                         tool_name,
@@ -628,13 +601,12 @@ def run_manager_agent(case_summary , conversation_id , user_id , correlation_id)
     
             else:
                 decision = response.text
-                _create_log(conv, "manager", f"Decision: {decision[:200]}")
+                _create_log(conversation_id, "manager", f"Decision: {decision[:200]}")
                 return decision
 
 def run_risk_agent(user_id , conversation_id , correlation_id) :
 
-    conv = Conversation.objects.get(id=conversation_id)
-    _create_log(conv, "risk", f"Starting fraud assessment for user {user_id}")
+    _create_log(conversation_id, "risk", f"Starting fraud assessment for user {user_id}")
 
     risk_messages = [
         types.Content(
@@ -651,7 +623,7 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
     
             response = _generate_content(
                 contents=risk_messages,
-                config=types.GenerateContentConfig(
+                config_=types.GenerateContentConfig(
                     system_instruction=RISK_SYSTEM_PROMPT,
                     tools=[
                         types.Tool(
@@ -680,7 +652,7 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
                     tool_name = function_call.name
                     tool_args = function_call.args
 
-                    _create_log(conv, "risk", f"Calling {tool_name} to get customer risk profile...")
+                    _create_log(conversation_id, "risk", f"Calling {tool_name} to get customer risk profile...")
     
                     result = execute_tool(
                         tool_name,
@@ -714,5 +686,5 @@ def run_risk_agent(user_id , conversation_id , correlation_id) :
     
             else:
                 verdict = response.text
-                _create_log(conv, "risk", f"Verdict: {verdict[:200]}")
+                _create_log(conversation_id, "risk", f"Verdict: {verdict[:200]}")
                 return verdict

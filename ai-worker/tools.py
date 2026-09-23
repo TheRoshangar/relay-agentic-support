@@ -1,53 +1,51 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as tz
 
-from orders.models import Order , RefundRequest 
-from django.utils import timezone
+import db
+import config
 from tracking_data import DELIVERY_DATA
 from rag import search_knowledge_base as rag_search
-from django.conf import settings
-from tavily import TavilyClient # type: ignore
-from django.db.models import F
-from support.models import Conversation
+from tavily import TavilyClient  # type: ignore
 
-def get_order_details(order_id) :
-    try:
-        order = Order.objects.get(id=order_id)
-        return {
-            "order_id" : order.id,
-            "product_name" : order.product_name,
-            "amount" : str(order.amount),
-            "status" : order.status,
-            "carrier" : order.carrier,
-            "tracking_number" : order.tracking_number,
-            "delivery_address" : order.delivery,
-            "ordered_on" : order.created_at.strftime("%d %b %Y"),
-            "days_since_order" : (timezone.now() - order.created_at).days
 
-        }
-    except Order.DoesNotExist: 
-        return {"error" : f"Order #{order_id} not found."}
+def get_order_details(order_id):
+    order = db.get_order(order_id)
+    if order is None:
+        return {"error": f"Order #{order_id} not found."}
+
+    return {
+        "order_id": order["id"],
+        "product_name": order["product_name"],
+        "amount": str(order["amount"]),
+        "status": order["status"],
+        "carrier": order["carrier"],
+        "tracking_number": order["tracking_number"],
+        "delivery_address": order["delivery"],
+        "ordered_on": order["created_at"].strftime("%d %b %Y"),
+        "days_since_order": (datetime.now(tz.utc) - order["created_at"]).days,
+    }
 
 
 def get_refund_history(user_id):
-   refunds = RefundRequest.objects.filter(user_id = user_id).order_by("-created_at")
+    refunds = db.get_refund_history(user_id)
 
-   history = []
-   for refund in refunds :
-       history.append({
-           'order_id': refund.order.id,
-           'product' : refund.order.product_name,
-           'reason' : refund.reason,
-           'status' : refund.status,
-           'requested_on' : refund.created_at.strftime("%d %b %Y")
-       })
-        
-   return {
-         "total_refund_request" : len(history) ,
-         "history" : history,
-     }        
+    history = [
+        {
+            "order_id": r["order_id"],
+            "product": r["product_name"],
+            "reason": r["reason"],
+            "status": r["status"],
+            "requested_on": r["created_at"].strftime("%d %b %Y"),
+        }
+        for r in refunds
+    ]
+
+    return {
+        "total_refund_request": len(history),
+        "history": history,
+    }
 
 
-def check_delivery_status(tracking_number , carrier) : 
+def check_delivery_status(tracking_number, carrier):
 
     if not isinstance(tracking_number, str) or not (1 <= len(tracking_number.strip()) <= 40):
         return {"error": "Invalid tracking number."}
@@ -57,7 +55,7 @@ def check_delivery_status(tracking_number , carrier) :
 
     tracking_number = tracking_number.strip()
     carrier = carrier.strip()
-    
+
     default_response = {
         "status": "Unknown",
         "last_location": "Tracking info unavailable",
@@ -65,52 +63,43 @@ def check_delivery_status(tracking_number , carrier) :
         "estimated_delivery": "Contact carrier directly",
         "delay_reason": "No updates from carrier",
     }
-    result = DELIVERY_DATA.get(tracking_number , default_response)
+    result = DELIVERY_DATA.get(tracking_number, default_response)
     result["tracking_number"] = tracking_number
     result["carrier"] = carrier
     return result
 
 
 def get_customer_risk_profile(user_id):
-    refunds = RefundRequest.objects.filter(user_id=user_id)
-    orders = Order.objects.filter(user_id=user_id)
+    counts = db.get_customer_risk_counts(user_id)
 
-    recent_refunds = refunds.filter(created_at__gte = timezone.now() - timedelta(days = 90)).count()
+    total_orders = counts["total_orders"]
+    total_refunds = counts["total_refunds"]
 
-    denied = refunds.filter(status = "denied").count()
-    approved = refunds.filter(status = "approved").count()
-    pending = refunds.filter(status = "pending").count()
-
-
-    total_orders = orders.count()
-    total_refunds = refunds.count()
-
-
-    if total_orders > 0 :
-        refund_to_order_ratio = round( total_refunds / total_orders, 2)
-
-    else :
+    if total_orders > 0:
+        refund_to_order_ratio = round(total_refunds / total_orders, 2)
+    else:
         refund_to_order_ratio = 0
 
     return {
         "user_id": user_id,
         "total_orders": total_orders,
         "total_refund_requests": total_refunds,
-        "refunds_last_90_days": recent_refunds,
-        "denied_refunds": denied,
-        "approved_refunds": approved,
-        "pending_refunds": pending,
-        "refund_to_order_ratio": refund_to_order_ratio
+        "refunds_last_90_days": counts["refunds_last_90_days"],
+        "denied_refunds": counts["denied_refunds"],
+        "approved_refunds": counts["approved_refunds"],
+        "pending_refunds": counts["pending_refunds"],
+        "refund_to_order_ratio": refund_to_order_ratio,
     }
+
 
 def search_knowledge_base(query):
     return rag_search(query)
 
 
-tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+tavily_client = TavilyClient(api_key=config.TAVILY_API_KEY)
 
 
-def search_web(query  , conversation_id=None):
+def search_web(query, conversation_id=None):
     try:
         response = tavily_client.search(
             query=query,
@@ -121,10 +110,7 @@ def search_web(query  , conversation_id=None):
         return {"error": f"Web search failed: {str(e)}"}
 
     if conversation_id:
-        Conversation.objects.filter(id=conversation_id).update(
-            tavily_calls=F("tavily_calls") + 1
-        )
-
+        db.increment_tavily_calls(conversation_id)
 
     results = []
     for r in response.get("results", []):

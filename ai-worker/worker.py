@@ -1,35 +1,34 @@
 import json
-import os
-import sys
-sys.path.insert(0, "/backend")
-from django.template.backends import django
-import pika  # type: ignore
 import time
+import uuid
+from datetime import datetime, timezone as tz
 
-from support.events import build_envelope, is_duplicate_event, mark_event_processed # type: ignore
+import pika  # type: ignore
 
-
-
-
-os.environ.setdefault(
-    "DJANGO_SETTINGS_MODULE",
-    "di_ai_employees_main.settings"
-)
-
-import django
-
-django.setup()
+import config
+import db
+from agents import run_support_agent  # type: ignore
 
 
-from django.shortcuts import get_object_or_404
-from agents import run_support_agent # type: ignore
-from support.models import Conversation, Message # type: ignore
+EVENT_VERSION = 1
 
 
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
-RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", "5672"))
-RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
-RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
+def build_envelope(event_type, payload, correlation_id=None):
+    envelope = {
+        "event_id": str(uuid.uuid4()),
+        "correlation_id": correlation_id or str(uuid.uuid4()),
+        "type": event_type,
+        "version": EVENT_VERSION,
+        "timestamp": datetime.now(tz.utc).isoformat(),
+    }
+    envelope.update(payload)
+    return envelope
+
+
+RABBITMQ_HOST = config.RABBITMQ_HOST
+RABBITMQ_PORT = config.RABBITMQ_PORT
+RABBITMQ_USER = config.RABBITMQ_USER
+RABBITMQ_PASSWORD = config.RABBITMQ_PASSWORD
 
 
 QUEUE_NAME = "support_events"
@@ -89,7 +88,7 @@ DLQ_NAME = "support_events_dlq"
 
 
 def declare_events_queue(channel):
-   
+
     channel.exchange_declare(
         exchange=DLX_NAME,
         exchange_type="fanout",
@@ -111,14 +110,14 @@ def declare_events_queue(channel):
     )
 
 MAX_RETRIES = 3
-BASE_DELAY = 2 
+BASE_DELAY = 2
 
 
 def process_event(envelope):
     event_id = envelope["event_id"]
     correlation_id = envelope["correlation_id"]
 
-    if is_duplicate_event(event_id):
+    if db.is_duplicate_event(event_id):
         print(f"Skipping duplicate event {event_id}", flush=True)
         return
 
@@ -150,16 +149,16 @@ def process_event(envelope):
             print(f"Attempt {attempt} failed ({e}), retrying in {delay}s", flush=True)
             time.sleep(delay)
 
-    conversation = get_object_or_404(Conversation, id=conversation_id)
+    db.get_conversation(conversation_id)
 
-    reply_message = Message.objects.create(
-        conversation=conversation,
+    reply_message_id = db.insert_message(
+        conversation_id=conversation_id,
         role="model",
         content=reply,
         correlation_id=correlation_id,
     )
 
-    mark_event_processed(event_id, envelope["type"])
+    db.mark_event_processed(event_id, envelope["type"])
 
     response_envelope = build_envelope(
         event_type="support_response",
@@ -168,7 +167,7 @@ def process_event(envelope):
             "order_id": order_id,
             "user_id": user_id,
             "reply": reply,
-            "reply_message_id": reply_message.id
+            "reply_message_id": reply_message_id
         },
         correlation_id=correlation_id,
     )
